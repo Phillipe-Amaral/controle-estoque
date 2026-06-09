@@ -4,12 +4,8 @@ import pandas as pd
 import plotly.express as px
 
 # ── Configuração ──────────────────────────────────────────────────────────────
-SUPABASE_URL = "https://dnchdssuifhibbquhqkg.supabase.co"
-SUPABASE_KEY = (
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-    ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRuY2hkc3N1aWZoaWJicXVocWtnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzMTY5NjEsImV4cCI6MjA5NTg5Mjk2MX0"
-    ".70QbG8dX1s5b5pH18jB2ehBTg8FVZMDiXZJPE9sCuKw"
-)
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
 st.set_page_config(
     page_title="Controle de Estoque",
