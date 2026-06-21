@@ -29,15 +29,20 @@ def carregar_itens():
 @st.cache_data(ttl=30)
 def carregar_compras():
     r = (sb.table("compras")
-         .select("id, parceiros(nome), itens(nome), fornecedor, qtd_pedida, qtd_recebida, valor_unitario, numero_pedido, nf, fase, data_pedido, data_recebimento")
+         .select("id, parceiro_id, item_id, fornecedor, qtd_pedida, qtd_recebida, valor_unitario, numero_pedido, nf, fase, data_pedido, data_recebimento")
          .order("id", desc=True)
          .execute())
+    rp = sb.table("parceiros").select("id, nome").execute()
+    ri = sb.table("itens").select("id, nome").execute()
+    parc_map = {p["id"]: p["nome"] for p in rp.data}
+    item_map = {i["id"]: i["nome"] for i in ri.data}
+
     rows = []
     for c in r.data:
         rows.append({
             "ID":          c["id"],
-            "Parceiro":    c["parceiros"]["nome"] if c["parceiros"] else "",
-            "Item":        c["itens"]["nome"] if c["itens"] else "",
+            "Parceiro":    parc_map.get(c["parceiro_id"], ""),
+            "Item":        item_map.get(c["item_id"], ""),
             "Fornecedor":  c["fornecedor"] or "",
             "Qtd Pedida":  c["qtd_pedida"],
             "Qtd Recebida":c["qtd_recebida"] or 0,
