@@ -48,7 +48,9 @@ def carregar_compras():
             "Data Pedido": c["data_pedido"] or "",
             "Data Receb.": c["data_recebimento"] or "",
         })
-    return pd.DataFrame(rows)
+    colunas = ["ID","Parceiro","Item","Fornecedor","Qtd Pedida","Qtd Recebida",
+               "Valor Unit.","Nº Pedido","NF","Fase","Data Pedido","Data Receb."]
+    return pd.DataFrame(rows, columns=colunas) if rows else pd.DataFrame(columns=colunas)
 
 # ── Título ────────────────────────────────────────────────────────────────────
 st.title("🛒 Cadastro de Compras")
