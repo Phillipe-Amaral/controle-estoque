@@ -27,14 +27,14 @@ def carregar_itens():
 
 @st.cache_data(ttl=30)
 def carregar_transferencias():
-    # busca transferências com IDs brutos
     r = (sb.table("transferencias")
-         .select("id, parceiro_origem_id, parceiro_destino_id, itens(nome), qtd, fase, motivo, data_transferencia, status, data_aceite")
+         .select("id, parceiro_origem_id, parceiro_destino_id, item_id, qtd, fase, motivo, data_transferencia, status, data_aceite")
          .order("id", desc=True)
          .execute())
-    # busca mapa de parceiros
     rp = sb.table("parceiros").select("id, nome").execute()
+    ri = sb.table("itens").select("id, nome").execute()
     parc_map = {p["id"]: p["nome"] for p in rp.data}
+    item_map = {i["id"]: i["nome"] for i in ri.data}
 
     colunas = ["ID","Origem","Destino","Item","Qtd","Fase","Motivo","Data","Status","Data Aceite"]
     rows = []
@@ -43,7 +43,7 @@ def carregar_transferencias():
             "ID":         t["id"],
             "Origem":     parc_map.get(t["parceiro_origem_id"], ""),
             "Destino":    parc_map.get(t["parceiro_destino_id"], ""),
-            "Item":       t["itens"]["nome"] if t.get("itens") else "",
+            "Item":       item_map.get(t["item_id"], ""),
             "Qtd":        t["qtd"],
             "Fase":       t["fase"] or "",
             "Motivo":     t["motivo"] or "",
