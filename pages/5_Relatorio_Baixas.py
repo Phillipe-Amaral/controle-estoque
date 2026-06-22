@@ -13,19 +13,29 @@ def get_client():
 
 sb = get_client()
 
+def fetch_all(table, cols):
+    PAGE = 1000
+    rows, offset = [], 0
+    while True:
+        r = sb.table(table).select(cols).range(offset, offset + PAGE - 1).execute()
+        rows.extend(r.data)
+        if len(r.data) < PAGE:
+            break
+        offset += PAGE
+    return rows
+
 @st.cache_data(ttl=60)
 def carregar_baixas():
-    r_exec = (sb.table("execucoes")
-              .select("id, parceiro_id, nome_escola, codigo_inep, municipio, uf, kit, fase, fabricante, data_implantacao")
-              .execute())
-    r_ei   = sb.table("execucao_itens").select("execucao_id, item_id, qtd").execute()
-    r_parc = sb.table("parceiros").select("id, nome").execute()
-    r_item = sb.table("itens").select("id, nome").execute()
+    r_exec = fetch_all("execucoes",
+                       "id, parceiro_id, nome_escola, codigo_inep, municipio, uf, kit, fase, fabricante, data_implantacao")
+    r_ei   = fetch_all("execucao_itens", "execucao_id, item_id, qtd")
+    r_parc = sb.table("parceiros").select("id, nome").execute().data
+    r_item = sb.table("itens").select("id, nome").execute().data
 
-    df_exec = pd.DataFrame(r_exec.data)
-    df_ei   = pd.DataFrame(r_ei.data)
-    df_parc = pd.DataFrame(r_parc.data).rename(columns={"id": "parceiro_id", "nome": "parceiro"})
-    df_item = pd.DataFrame(r_item.data).rename(columns={"id": "item_id", "nome": "item"})
+    df_exec = pd.DataFrame(r_exec)
+    df_ei   = pd.DataFrame(r_ei)
+    df_parc = pd.DataFrame(r_parc).rename(columns={"id": "parceiro_id", "nome": "parceiro"})
+    df_item = pd.DataFrame(r_item).rename(columns={"id": "item_id", "nome": "item"})
 
     df = (df_ei
           .merge(df_exec, left_on="execucao_id", right_on="id")
