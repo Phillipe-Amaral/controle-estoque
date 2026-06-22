@@ -200,6 +200,7 @@ with tab2:
                         "uf":               prev["uf"],
                         "kit":              prev["kit"],
                         "fase":             prev["fase"],
+                        "fabricante":       prev["fabricante"],
                         "data_implantacao": prev["data_inst"],
                     }).execute()
 
