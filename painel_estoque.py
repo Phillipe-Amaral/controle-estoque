@@ -40,9 +40,12 @@ parceiros_lista = ["Todos"] + sorted(df_base["parceiro"].dropna().unique().tolis
 fases_lista     = ["Todas"] + sorted(df_base["fase"].dropna().unique().tolist())
 fabr_lista      = ["Todos"] + sorted(df_base["fabricante"].dropna().unique().tolist())
 
-parceiro_sel = st.sidebar.selectbox("Parceiro", parceiros_lista)
-fase_sel     = st.sidebar.selectbox("Fase",     fases_lista)
-fabr_sel     = st.sidebar.selectbox("Fabricante", fabr_lista)
+itens_lista  = ["Todos"] + sorted(df_base["item"].dropna().unique().tolist())
+
+parceiro_sel = st.sidebar.selectbox("Parceiro",    parceiros_lista)
+fase_sel     = st.sidebar.selectbox("Fase",        fases_lista)
+fabr_sel     = st.sidebar.selectbox("Fabricante",  fabr_lista)
+item_sel     = st.sidebar.selectbox("Item",        itens_lista)
 
 st.sidebar.markdown("---")
 mostrar_negativos = st.sidebar.checkbox("⚠️ Mostrar apenas saldo negativo", value=False)
@@ -56,6 +59,8 @@ if fase_sel != "Todas":
     df = df[df["fase"] == fase_sel]
 if fabr_sel != "Todos":
     df = df[df["fabricante"] == fabr_sel]
+if item_sel != "Todos":
+    df = df[df["item"] == item_sel]
 if mostrar_negativos:
     df = df[df["saldo_atual"] < 0]
 
