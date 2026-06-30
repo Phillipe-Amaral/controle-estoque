@@ -166,6 +166,46 @@ with tab1:
 
     st.markdown("---")
 
+    # KPI por tipo de receita/custo
+    st.subheader("KPI por Tipo de Receita × Custo (24M Real)")
+    k1, k2, k3 = st.columns(3)
+
+    # Equipamentos RI
+    rec_eq  = df_f['rec_equip_ri_real'].sum()
+    cus_eq  = df_f['custo_equip_cmv'].sum()
+    marg_eq = rec_eq - cus_eq
+    with k1:
+        st.markdown("**📦 Equipamentos RI**")
+        st.metric("Receita Equip RI",  fmt_brl(rec_eq))
+        st.metric("Custo CMV",         fmt_brl(cus_eq))
+        st.metric("Margem Equip",      fmt_brl(marg_eq),
+                  delta=f"{marg_eq/rec_eq*100:.1f}%" if rec_eq else None, delta_color="normal")
+
+    # Serviço + Manutenção RI
+    rec_sv  = df_f['rec_serv_ri_real'].sum() + df_f['rec_manut_24m_ri'].sum()
+    cus_sv  = df_f['custo_serv_ri'].sum()
+    marg_sv = rec_sv - cus_sv
+    with k2:
+        st.markdown("**🔧 Serviço + Manutenção RI**")
+        st.metric("Receita Serv+Manut RI", fmt_brl(rec_sv))
+        st.metric("Custo Serv RI",         fmt_brl(cus_sv))
+        st.metric("Margem Serv RI",        fmt_brl(marg_sv),
+                  delta=f"{marg_sv/rec_sv*100:.1f}%" if rec_sv else None, delta_color="normal")
+
+    # Rede Externa RE
+    rec_re  = df_f['rec_inst_re_prev'].sum() + df_f['rec_mens_re_24m'].sum()
+    cus_re  = df_f['custo_24m_re_real'].where(df_f['custo_24m_re_real'] > 0,
+                                               df_f['custo_24m_re_orc']).sum()
+    marg_re = rec_re - cus_re
+    with k3:
+        st.markdown("**🌐 Rede Externa RE**")
+        st.metric("Receita RE 24M",  fmt_brl(rec_re))
+        st.metric("Custo RE 24M",    fmt_brl(cus_re))
+        st.metric("Margem RE",       fmt_brl(marg_re),
+                  delta=f"{marg_re/rec_re*100:.1f}%" if rec_re else None, delta_color="normal")
+
+    st.markdown("---")
+
     # Custo real × Receita real RI por fase
     st.subheader("Custo Real × Receita Real RI por Fase")
     df_fase = df_f.groupby('fase').agg(
