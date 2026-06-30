@@ -90,14 +90,21 @@ def to_excel(df_export):
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 st.sidebar.title("🔍 Filtros Globais")
+STATUS_RDO_ORDEM = [
+    'RDO Aprovada','Em Aprovação EACE','Em Aprovação IUH - Subir RDO',
+    'Em Execução Técnico','RDO Reprovada','Sem RDO','Cancelado',
+]
 estados_list  = sorted(df_all['uf'].dropna().unique().tolist())
 fases_list    = sorted(df_all['fase'].dropna().unique().tolist())
 resp_list     = sorted(df_all['responsavel_re'].dropna().unique().tolist())
+status_rdo_list = [s for s in STATUS_RDO_ORDEM
+                   if s in df_all.get('status_rdo', pd.Series(dtype=str)).dropna().unique()]
 
-sel_estados  = st.sidebar.multiselect("Estado (UF)", estados_list)
-sel_fases    = st.sidebar.multiselect("Fase", fases_list)
-sel_resp     = st.sidebar.multiselect("Responsável RE", resp_list)
-sel_inep     = st.sidebar.text_input("Buscar INEP")
+sel_estados   = st.sidebar.multiselect("Estado (UF)", estados_list)
+sel_fases     = st.sidebar.multiselect("Fase", fases_list)
+sel_resp      = st.sidebar.multiselect("Responsável RE", resp_list)
+sel_status_rdo = st.sidebar.multiselect("Status RDO (ANIEL)", status_rdo_list)
+sel_inep      = st.sidebar.text_input("Buscar INEP")
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"Base: {len(df_all):,} escolas | Atualizado: {TODAY}")
@@ -108,6 +115,8 @@ if st.sidebar.button("🔄 Atualizar dados"):
 
 df_f = apply_filters(df_all, estados=sel_estados or None, fases=sel_fases or None,
                      inep=sel_inep or None, responsavel=sel_resp or None)
+if sel_status_rdo and 'status_rdo' in df_f.columns:
+    df_f = df_f[df_f['status_rdo'].isin(sel_status_rdo)]
 
 # ── Título ────────────────────────────────────────────────────────────────────
 st.title("💰 Painel Financeiro — Custos e Receitas")
