@@ -218,7 +218,7 @@ with tab1:
     if not df_pz.empty:
         counts = df_pz['status_parcial'].value_counts().reset_index()
         counts.columns = ['Status', 'Qtd']
-        colors = {'LUCRO':'#2ca02c','PREJUÍZO':'#d62728','NEUTRO':'#aec7e8'}
+        colors = {'LUCRO':'#2ca02c','PREJUÍZO':'#d62728','NEUTRO':'#aec7e8','PENDENTE':'#ffb347'}
         fig_pz = px.pie(counts, names='Status', values='Qtd',
                         color='Status', color_discrete_map=colors, height=380,
                         title=f'{len(df_pz):,} INEPs')
@@ -385,12 +385,14 @@ with tab4:
     # Format date columns
     for dc in ['Inst RI','Inst RE','RDO']:
         if dc in df_show.columns:
-            df_show[dc] = df_show[dc].dt.strftime('%d/%m/%Y').where(df_show[dc].notna(), '')
+            col_dt = pd.to_datetime(df_show[dc], errors='coerce')
+            df_show[dc] = col_dt.dt.strftime('%d/%m/%Y').where(col_dt.notna(), '')
 
     def colorir(val):
         if isinstance(val, str):
             if val == 'LUCRO':    return 'background-color:#c6efce; color:#276221'
             if val == 'PREJUÍZO': return 'background-color:#ffc7ce; color:#9c0006'
+            if val == 'PENDENTE': return 'background-color:#fff2cc; color:#7d6608'
         if isinstance(val, (int, float)):
             if val < 0: return 'color:#9c0006; font-weight:bold'
         return ''
