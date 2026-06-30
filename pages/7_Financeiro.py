@@ -33,7 +33,7 @@ def carregar_financeiro():
             df[c] = pd.to_datetime(df[c], errors='coerce')
     num_cols = [c for c in df.columns if c not in
                 ['inep','escola','uf','municipio','fase','lote','parceiro_ri',
-                 'responsavel_re','kit_previsto','kit_real','status_parcial','updated_at']]
+                 'responsavel_re','kit_previsto','kit_real','status_parcial','status_rdo','updated_at']]
     for c in num_cols:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
