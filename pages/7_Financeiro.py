@@ -439,7 +439,8 @@ with tab5:
         df_exp = df_f.copy()
         for dc in ['data_inst_ri','data_manut_ri','data_inst_re','data_rdo']:
             if dc in df_exp.columns:
-                df_exp[dc] = df_exp[dc].dt.strftime('%d/%m/%Y').where(df_exp[dc].notna(), '')
+                col_dt = pd.to_datetime(df_exp[dc], errors='coerce')
+                df_exp[dc] = col_dt.dt.strftime('%d/%m/%Y').where(col_dt.notna(), '')
 
     xls = to_excel(df_exp)
     st.download_button(
