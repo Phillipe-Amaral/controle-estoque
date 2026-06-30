@@ -65,15 +65,21 @@ def apply_filters(df, estados=None, fases=None, inep=None, responsavel=None,
         d = d[d['inep'].str.contains(inep, na=False)]
     if responsavel:
         d = d[d['responsavel_re'].isin(responsavel)]
-    if data_inst_ri and d['data_inst_ri'].notna().any():
-        d = d[(d['data_inst_ri'].dt.date >= data_inst_ri[0]) &
-              (d['data_inst_ri'].dt.date <= data_inst_ri[1])]
-    if data_inst_re and d['data_inst_re'].notna().any():
-        d = d[(d['data_inst_re'].dt.date >= data_inst_re[0]) &
-              (d['data_inst_re'].dt.date <= data_inst_re[1])]
-    if data_rdo and d['data_rdo'].notna().any():
-        d = d[(d['data_rdo'].dt.date >= data_rdo[0]) &
-              (d['data_rdo'].dt.date <= data_rdo[1])]
+    if data_inst_ri:
+        col = pd.to_datetime(d['data_inst_ri'], errors='coerce')
+        mask = col.notna()
+        if mask.any():
+            d = d[~mask | ((col.dt.date >= data_inst_ri[0]) & (col.dt.date <= data_inst_ri[1]))]
+    if data_inst_re:
+        col = pd.to_datetime(d['data_inst_re'], errors='coerce')
+        mask = col.notna()
+        if mask.any():
+            d = d[~mask | ((col.dt.date >= data_inst_re[0]) & (col.dt.date <= data_inst_re[1]))]
+    if data_rdo:
+        col = pd.to_datetime(d['data_rdo'], errors='coerce')
+        mask = col.notna()
+        if mask.any():
+            d = d[~mask | ((col.dt.date >= data_rdo[0]) & (col.dt.date <= data_rdo[1]))]
     return d
 
 def to_excel(df_export):
