@@ -185,9 +185,10 @@ with tab1:
         fa_data = st.date_input("Data Instalação RI (de/até)",
                                 value=(date(2024,1,1), TODAY), key="ap_data")
 
+    fa_data_safe = fa_data if (isinstance(fa_data, (list, tuple)) and len(fa_data) == 2) else None
     df_ap = apply_filters(df_f,
                           fases=fa_fase or None, estados=fa_uf or None,
-                          data_inst_ri=fa_data if len(fa_data)==2 else None)
+                          data_inst_ri=fa_data_safe)
     df_ap = df_ap[df_ap['aps_ad_impl'] > 0]
     if not df_ap.empty:
         df_ap_g = df_ap.groupby('fase').apply(lambda x: pd.Series({
@@ -313,10 +314,12 @@ with tab3:
     with cri5:
         ri_drdo = st.date_input("Aprovação RDO (de/até)", value=(date(2024,1,1), TODAY), key="ri_drdo")
 
+    def safe_date(v):
+        return v if (isinstance(v, (list, tuple)) and len(v) == 2) else None
     df_ri = apply_filters(df_f, fases=ri_fase or None, estados=ri_uf or None,
-                          data_inst_ri=ri_dri if len(ri_dri)==2 else None,
-                          data_inst_re=ri_dre if len(ri_dre)==2 else None,
-                          data_rdo=ri_drdo if len(ri_drdo)==2 else None)
+                          data_inst_ri=safe_date(ri_dri),
+                          data_inst_re=safe_date(ri_dre),
+                          data_rdo=safe_date(ri_drdo))
 
     c1, c2, c3, c4 = st.columns(4)
     rec_tot  = df_ri['receita_24m_total_real'].sum()
