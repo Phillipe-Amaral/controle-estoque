@@ -9,9 +9,10 @@ import io, base64
 st.set_page_config(page_title="Financeiro | IUH Digital", page_icon="📊", layout="wide")
 
 # ── Tema IUH ──────────────────────────────────────────────────────────────────
-IUH_TEAL    = "#17B5C8"
-IUH_DARK    = "#1a2b4b"
-IUH_DARKER  = "#13203a"
+IUH_TEAL    = "#0C6679"   # teal escuro (letras iuh)
+IUH_ACCENT  = "#2EDBA0"   # verde menta (exclamação)
+IUH_DARK    = "#0a4a5a"
+IUH_DARKER  = "#073a48"
 
 IUH_CSS = f"""
 <style>
@@ -20,6 +21,8 @@ html, body, [data-testid="stAppViewContainer"] {{
     background: #f0f4f8;
     font-family: 'Segoe UI', Arial, sans-serif;
 }}
+/* accent verde menta nos destaques */
+[data-testid="stMetric"] {{ border-left-color: {IUH_ACCENT}; }}
 .main .block-container {{
     padding-top: 1.2rem;
     padding-bottom: 2rem;
@@ -28,7 +31,7 @@ html, body, [data-testid="stAppViewContainer"] {{
 
 /* ── Sidebar ── */
 [data-testid="stSidebar"] > div:first-child {{
-    background: linear-gradient(180deg, {IUH_DARK} 0%, {IUH_DARKER} 100%);
+    background: linear-gradient(180deg, #0a3d4a 0%, #062e39 100%);
     padding-top: 0;
 }}
 [data-testid="stSidebar"] * {{ color: #cbd5e0 !important; }}
@@ -138,7 +141,7 @@ hr {{ border-color: #e2e8f0 !important; margin: 1.2rem 0 !important; }}
     padding: 1.2rem 1.6rem;
     margin-bottom: 1.2rem;
     box-shadow: 0 1px 6px rgba(0,0,0,0.07);
-    border-left: 5px solid {IUH_TEAL};
+    border-left: 5px solid {IUH_ACCENT};
     display: flex;
     align-items: center;
     gap: 1.2rem;
@@ -263,10 +266,23 @@ def to_excel(df_export):
     return buf.getvalue()
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
-st.sidebar.markdown("""
+# Logo IUH como base64 (compatível com Streamlit Cloud)
+import pathlib
+_logo_path = pathlib.Path(__file__).parent.parent / "assets" / "logo_iuh.png"
+if _logo_path.exists():
+    _logo_b64 = base64.b64encode(_logo_path.read_bytes()).decode()
+    st.sidebar.markdown(f"""
+<div class="iuh-logo-box" style="text-align:center">
+  <img src="data:image/png;base64,{_logo_b64}"
+       style="width:140px; margin:0 auto; display:block; filter:brightness(0) invert(1);" />
+  <div class="iuh-logo-sub" style="margin-top:6px;">Painel Financeiro</div>
+</div>
+""", unsafe_allow_html=True)
+else:
+    st.sidebar.markdown("""
 <div class="iuh-logo-box">
-  <div class="iuh-logo-text">iuh</div>
-  <div class="iuh-logo-sub">Digital &nbsp;·&nbsp; Financeiro</div>
+  <div class="iuh-logo-text">iuh!</div>
+  <div class="iuh-logo-sub">Painel Financeiro</div>
 </div>
 """, unsafe_allow_html=True)
 st.sidebar.markdown("### 🔍 Filtros")
