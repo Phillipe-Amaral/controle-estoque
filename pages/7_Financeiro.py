@@ -1,189 +1,16 @@
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import streamlit as st
 from supabase import create_client
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import date, datetime
-import io, base64
+import io
+from utils.tema_iuh import aplicar_tema, sidebar_logo, page_header
 
 st.set_page_config(page_title="Financeiro | IUH Digital", page_icon="📊", layout="wide")
-
-# ── Tema IUH ──────────────────────────────────────────────────────────────────
-IUH_TEAL    = "#0C6679"   # teal escuro (letras iuh)
-IUH_ACCENT  = "#2EDBA0"   # verde menta (exclamação)
-IUH_DARK    = "#0a4a5a"
-IUH_DARKER  = "#073a48"
-
-IUH_CSS = f"""
-<style>
-/* ── Base ── */
-html, body, [data-testid="stAppViewContainer"] {{
-    background: #f0f4f8;
-    font-family: 'Segoe UI', Arial, sans-serif;
-}}
-/* accent verde menta nos destaques */
-[data-testid="stMetric"] {{ border-left-color: {IUH_ACCENT}; }}
-.main .block-container {{
-    padding-top: 1.2rem;
-    padding-bottom: 2rem;
-    max-width: 1400px;
-}}
-
-/* ── Sidebar ── */
-[data-testid="stSidebar"] > div:first-child {{
-    background: linear-gradient(180deg, #0a3d4a 0%, #062e39 100%);
-    padding-top: 0;
-}}
-[data-testid="stSidebar"] * {{ color: #cbd5e0 !important; }}
-[data-testid="stSidebar"] h1,
-[data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3 {{ color: #ffffff !important; }}
-[data-testid="stSidebar"] label {{
-    color: #94a3b8 !important;
-    font-size: 0.73rem !important;
-    font-weight: 700 !important;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-}}
-[data-testid="stSidebar"] hr {{ border-color: #2d3f60 !important; }}
-[data-testid="stSidebar"] .stButton > button {{
-    background: {IUH_TEAL} !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 6px !important;
-    font-weight: 600 !important;
-    width: 100%;
-}}
-[data-testid="stSidebar"] .stButton > button:hover {{
-    background: #0d9db0 !important;
-}}
-
-/* ── KPI Metric cards ── */
-[data-testid="stMetric"] {{
-    background: #ffffff;
-    border-radius: 10px;
-    padding: 1rem 1.1rem 0.9rem;
-    border-left: 4px solid {IUH_TEAL};
-    box-shadow: 0 1px 6px rgba(0,0,0,0.07);
-    margin-bottom: 0.4rem;
-}}
-[data-testid="stMetricLabel"] > div {{
-    font-size: 0.68rem !important;
-    font-weight: 700 !important;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #64748b !important;
-}}
-[data-testid="stMetricValue"] > div {{
-    font-size: 1.45rem !important;
-    font-weight: 800 !important;
-    color: {IUH_DARK} !important;
-}}
-[data-testid="stMetricDelta"] > div {{
-    font-size: 0.8rem !important;
-    font-weight: 600 !important;
-}}
-
-/* ── Tabs ── */
-[data-testid="stTabs"] [data-baseweb="tab-list"] {{
-    background: white;
-    border-radius: 8px 8px 0 0;
-    padding: 0 0.5rem;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-    gap: 0;
-}}
-[data-testid="stTabs"] [data-baseweb="tab"] {{
-    font-weight: 600;
-    font-size: 0.85rem;
-    color: #64748b;
-    padding: 0.75rem 1.1rem;
-    border-bottom: 3px solid transparent;
-}}
-[data-testid="stTabs"] [aria-selected="true"] {{
-    color: {IUH_TEAL} !important;
-    border-bottom: 3px solid {IUH_TEAL} !important;
-    background: transparent !important;
-}}
-
-/* ── Subheadings ── */
-h2, h3 {{
-    color: {IUH_DARK} !important;
-    font-weight: 700 !important;
-}}
-
-/* ── Cards de seção ── */
-[data-testid="stHorizontalBlock"] > div {{
-    gap: 0.6rem;
-}}
-
-/* ── Multiselect tag color ── */
-[data-baseweb="tag"] {{
-    background-color: {IUH_TEAL} !important;
-}}
-
-/* ── Download / primary buttons ── */
-.stDownloadButton > button,
-.stButton [kind="primary"] {{
-    background-color: {IUH_TEAL} !important;
-    border: none !important;
-    color: white !important;
-    font-weight: 700 !important;
-    border-radius: 7px !important;
-}}
-
-/* ── Divisor ── */
-hr {{ border-color: #e2e8f0 !important; margin: 1.2rem 0 !important; }}
-
-/* ── Página header ── */
-.iuh-header {{
-    background: white;
-    border-radius: 12px;
-    padding: 1.2rem 1.6rem;
-    margin-bottom: 1.2rem;
-    box-shadow: 0 1px 6px rgba(0,0,0,0.07);
-    border-left: 5px solid {IUH_ACCENT};
-    display: flex;
-    align-items: center;
-    gap: 1.2rem;
-}}
-.iuh-header-title {{
-    font-size: 1.5rem;
-    font-weight: 800;
-    color: {IUH_DARK};
-    margin: 0;
-    line-height: 1.2;
-}}
-.iuh-header-sub {{
-    font-size: 0.82rem;
-    color: #64748b;
-    margin: 0.15rem 0 0;
-}}
-
-/* ── Sidebar logo box ── */
-.iuh-logo-box {{
-    background: linear-gradient(135deg, {IUH_TEAL}22 0%, transparent 100%);
-    border-bottom: 1px solid #2d3f60;
-    padding: 1.1rem 1.2rem 0.9rem;
-    margin-bottom: 0.5rem;
-}}
-.iuh-logo-text {{
-    font-size: 2rem;
-    font-weight: 900;
-    color: {IUH_TEAL} !important;
-    letter-spacing: -2px;
-    line-height: 1;
-}}
-.iuh-logo-sub {{
-    font-size: 0.65rem;
-    letter-spacing: 0.2em;
-    color: #94a3b8 !important;
-    font-weight: 600;
-    text-transform: uppercase;
-    margin-top: 2px;
-}}
-</style>
-"""
-st.markdown(IUH_CSS, unsafe_allow_html=True)
+aplicar_tema()
 
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
@@ -218,7 +45,6 @@ def carregar_financeiro():
 
 TODAY = date.today()
 
-# ── Carrega dados ─────────────────────────────────────────────────────────────
 df_all = carregar_financeiro()
 
 if df_all.empty:
@@ -266,26 +92,7 @@ def to_excel(df_export):
     return buf.getvalue()
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
-# Logo IUH como base64 (compatível com Streamlit Cloud)
-import pathlib
-_logo_path = pathlib.Path(__file__).parent.parent / "assets" / "logo_iuh.png"
-if _logo_path.exists():
-    _logo_b64 = base64.b64encode(_logo_path.read_bytes()).decode()
-    st.sidebar.markdown(f"""
-<div class="iuh-logo-box" style="text-align:center">
-  <img src="data:image/png;base64,{_logo_b64}"
-       style="width:140px; margin:0 auto; display:block; filter:brightness(0) invert(1);" />
-  <div class="iuh-logo-sub" style="margin-top:6px;">Painel Financeiro</div>
-</div>
-""", unsafe_allow_html=True)
-else:
-    st.sidebar.markdown("""
-<div class="iuh-logo-box">
-  <div class="iuh-logo-text">iuh!</div>
-  <div class="iuh-logo-sub">Painel Financeiro</div>
-</div>
-""", unsafe_allow_html=True)
-st.sidebar.markdown("### 🔍 Filtros")
+sidebar_logo("Painel Financeiro")
 STATUS_RDO_ORDEM = [
     'RDO Aprovada','Em Aprovação EACE','Em Aprovação IUH - Subir RDO',
     'Em Execução Técnico','RDO Reprovada','Sem RDO','Cancelado',
@@ -296,6 +103,7 @@ resp_list     = sorted(df_all['responsavel_re'].dropna().unique().tolist())
 status_rdo_list = [s for s in STATUS_RDO_ORDEM
                    if s in df_all.get('status_rdo', pd.Series(dtype=str)).dropna().unique()]
 
+st.sidebar.markdown("### 🔍 Filtros")
 sel_estados   = st.sidebar.multiselect("Estado (UF)", estados_list)
 sel_fases     = st.sidebar.multiselect("Fase", fases_list)
 sel_resp      = st.sidebar.multiselect("Responsável RE", resp_list)
@@ -314,17 +122,11 @@ df_f = apply_filters(df_all, estados=sel_estados or None, fases=sel_fases or Non
 if sel_status_rdo and 'status_rdo' in df_f.columns:
     df_f = df_f[df_f['status_rdo'].isin(sel_status_rdo)]
 
-# ── Título ────────────────────────────────────────────────────────────────────
-st.markdown(f"""
-<div class="iuh-header">
-  <div>
-    <p class="iuh-header-title">📊 Painel Financeiro — Custos e Receitas</p>
-    <p class="iuh-header-sub">
-        {len(df_f):,} escolas selecionadas &nbsp;·&nbsp; Atualizado em {TODAY.strftime('%d/%m/%Y')}
-    </p>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+# ── Header ────────────────────────────────────────────────────────────────────
+page_header(
+    "📊 Painel Financeiro — Custos e Receitas",
+    f"{len(df_f):,} escolas selecionadas · Atualizado em {TODAY.strftime('%d/%m/%Y')}",
+)
 
 # ══════════════════════════════════════════════════════════════════════════════
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -369,11 +171,9 @@ with tab1:
 
     st.markdown("---")
 
-    # KPI por tipo de receita/custo
     st.subheader("KPI por Tipo de Receita × Custo (24M Real)")
     k1, k2, k3 = st.columns(3)
 
-    # Equipamentos RI
     rec_eq  = df_f['rec_equip_ri_real'].sum()
     cus_eq  = df_f['custo_equip_cmv'].sum()
     marg_eq = rec_eq - cus_eq
@@ -384,7 +184,6 @@ with tab1:
         st.metric("Margem Equip",      fmt_brl(marg_eq),
                   delta=f"{marg_eq/rec_eq*100:.1f}%" if rec_eq else None, delta_color="normal")
 
-    # Serviço + Manutenção RI
     rec_sv  = df_f['rec_serv_ri_real'].sum() + df_f['rec_manut_24m_ri'].sum()
     cus_sv  = df_f['custo_serv_ri'].sum()
     marg_sv = rec_sv - cus_sv
@@ -395,7 +194,6 @@ with tab1:
         st.metric("Margem Serv RI",        fmt_brl(marg_sv),
                   delta=f"{marg_sv/rec_sv*100:.1f}%" if rec_sv else None, delta_color="normal")
 
-    # Rede Externa RE
     rec_re  = df_f['rec_inst_re_prev'].sum() + df_f['rec_mens_re_24m'].sum()
     cus_re  = df_f['custo_24m_re_real'].where(df_f['custo_24m_re_real'] > 0,
                                                df_f['custo_24m_re_orc']).sum()
@@ -409,7 +207,6 @@ with tab1:
 
     st.markdown("---")
 
-    # Custo real × Receita real RI por fase
     st.subheader("Custo Real × Receita Real RI por Fase")
     df_fase = df_f.groupby('fase').agg(
         Receita_RI=('receita_24m_total_real','sum'),
@@ -419,14 +216,13 @@ with tab1:
     df_fase_m = df_fase.melt(id_vars='fase', value_vars=['Receita_RI','Custo_RI','Margem'],
                               var_name='Métrica', value_name='Valor (R$)')
     fig_fase = px.bar(df_fase_m, x='fase', y='Valor (R$)', color='Métrica', barmode='group',
-                      color_discrete_map={'Receita_RI':'#2ca02c','Custo_RI':'#d62728','Margem':'#1f77b4'},
+                      color_discrete_map={'Receita_RI':'#2ca02c','Custo_RI':'#d62728','Margem':'#0C6679'},
                       height=380)
     fig_fase.update_layout(margin=dict(l=0,r=0,t=20,b=0))
     st.plotly_chart(fig_fase, use_container_width=True)
 
     st.markdown("---")
 
-    # Receita e custo médio por AP instalado
     st.subheader("Receita e Custo Médio por AP Instalado")
     c_fa, c_fb, c_fc = st.columns(3)
     with c_fa:
@@ -438,8 +234,7 @@ with tab1:
                                 value=(date(2024,1,1), TODAY), key="ap_data")
 
     fa_data_safe = fa_data if (isinstance(fa_data, (list, tuple)) and len(fa_data) == 2) else None
-    df_ap = apply_filters(df_f,
-                          fases=fa_fase or None, estados=fa_uf or None,
+    df_ap = apply_filters(df_f, fases=fa_fase or None, estados=fa_uf or None,
                           data_inst_ri=fa_data_safe)
     df_ap = df_ap[df_ap['aps_ad_impl'] > 0]
     if not df_ap.empty:
@@ -457,7 +252,6 @@ with tab1:
 
     st.markdown("---")
 
-    # Pizza LUCRO × PREJUÍZO
     st.subheader("% INEPs com Receita Positiva × Negativa (parcial)")
     c_pza, c_pzb = st.columns(2)
     with c_pza:
@@ -505,14 +299,13 @@ with tab2:
               delta_color="inverse" if delta > 0 else "normal")
     r4.metric("Escolas com RE real",  int((df_re['custo_24m_re_real'] > 0).sum()))
 
-    # Bar por UF
     df_re_uf = df_re.groupby('uf').agg(
         Orçado_24M=('custo_24m_re_orc','sum'),
         Real_24M=('custo_24m_re_real','sum'),
     ).reset_index().sort_values('Real_24M', ascending=False).head(20)
     fig_re = px.bar(df_re_uf.melt('uf'), x='uf', y='value', color='variable',
                     barmode='group', labels={'value':'R$ (24M)','variable':''},
-                    color_discrete_map={'Orçado_24M':'#1f77b4','Real_24M':'#ff7f0e'},
+                    color_discrete_map={'Orçado_24M':'#0C6679','Real_24M':'#2EDBA0'},
                     height=380, title="Custo RE 24M por UF (top 20)")
     st.plotly_chart(fig_re, use_container_width=True)
 
@@ -530,7 +323,6 @@ with tab2:
               delta=f"{margem_re/rec_re_proj*100:.1f}%" if rec_re_proj else None,
               delta_color="normal")
 
-    # Scatter por UF
     df_sc = df_re.groupby('uf').agg(
         Receita_RE=('rec_mens_re_24m','sum'),
         Custo_RE=('custo_24m_re_real','sum'),
@@ -540,7 +332,6 @@ with tab2:
                         color='uf', hover_name='uf', height=380,
                         labels={'Custo_RE':'Custo Real RE 24M (R$)','Receita_RE':'Receita Proj RE 24M (R$)'},
                         title="Custo vs Receita RE por UF")
-    # Linha de equilíbrio
     mx = max(df_sc[['Custo_RE','Receita_RE']].max().max(), 1)
     fig_sc.add_shape(type='line', x0=0, y0=0, x1=mx, y1=mx,
                      line=dict(dash='dash', color='gray'))
@@ -584,7 +375,6 @@ with tab3:
               delta_color="normal")
     c4.metric("Escolas filtradas",  len(df_ri))
 
-    # Waterfall por parceiro RI
     st.markdown("---")
     st.subheader("Receita Real × Custo Real por Parceiro RI")
     df_parc = df_ri.groupby('parceiro_ri').agg(
@@ -596,7 +386,7 @@ with tab3:
     df_parc_m = df_parc.melt('parceiro_ri', value_vars=['Receita_24M','Custo_24M','Margem'],
                                var_name='Tipo', value_name='Valor')
     fig_parc = px.bar(df_parc_m, x='parceiro_ri', y='Valor', color='Tipo', barmode='group',
-                      color_discrete_map={'Receita_24M':'#2ca02c','Custo_24M':'#d62728','Margem':'#1f77b4'},
+                      color_discrete_map={'Receita_24M':'#2ca02c','Custo_24M':'#d62728','Margem':'#0C6679'},
                       height=420, labels={'parceiro_ri':'Parceiro RI','Valor':'R$'})
     fig_parc.update_xaxes(tickangle=45)
     fig_parc.update_layout(margin=dict(b=120))
@@ -614,27 +404,20 @@ with tab4:
         'parceiro_ri':'Parceiro RI','responsavel_re':'Responsável RE',
         'kit_previsto':'Kit Prev','kit_real':'Kit Real','aps_ad_impl':'APs Ad.',
         'data_inst_ri':'Inst RI','data_inst_re':'Inst RE','data_rdo':'RDO',
-        # Receita prevista RI
         'rec_equip_ri_prev':'Rec Equip RI Prev','rec_serv_ri_prev':'Rec Serv RI Prev',
         'rec_manut_24m_ri':'Manut 24M RI',
-        # Receita prevista RE
         'rec_inst_re_prev':'Inst RE Prev','rec_mens_re_24m':'Mensalidade RE 24M',
-        # Receita real
         'rec_equip_ri_real':'Rec Equip RI Real','rec_serv_ri_real':'Rec Serv RI Real',
-        # Custos
         'custo_serv_ri':'Custo Serv RI','custo_equip_cmv':'CMV RI',
         'custo_24m_re_orc':'Custo RE 24M Orç','custo_24m_re_real':'Custo RE 24M Real',
-        # Parcial
         'receita_parcial':'Rec Parcial','custo_parcial':'Custo Parcial',
         'margem_parcial':'Margem Parcial','status_parcial':'Status',
-        # 24M
         'receita_24m_total_real':'Rec 24M Real','custo_24m_total_real':'Custo 24M Real',
         'margem_24m_real':'Margem 24M Real',
     }
     existing = {k:v for k,v in col_display.items() if k in df_f.columns}
     df_show = df_f[list(existing.keys())].rename(columns=existing).copy()
 
-    # Format date columns
     for dc in ['Inst RI','Inst RE','RDO']:
         if dc in df_show.columns:
             col_dt = pd.to_datetime(df_show[dc], errors='coerce')

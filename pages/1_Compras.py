@@ -2,8 +2,13 @@ import streamlit as st
 from supabase import create_client
 import pandas as pd
 from datetime import date
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+from utils.tema_iuh import aplicar_tema, sidebar_logo, page_header
 
 st.set_page_config(page_title="Compras", page_icon="🛒", layout="wide")
+aplicar_tema()
+sidebar_logo("Compras")
 
 # ── Conexão ───────────────────────────────────────────────────────────────────
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -58,8 +63,7 @@ def carregar_compras():
     return pd.DataFrame(rows, columns=colunas) if rows else pd.DataFrame(columns=colunas)
 
 # ── Título ────────────────────────────────────────────────────────────────────
-st.title("🛒 Cadastro de Compras")
-st.caption("Registre novos pedidos e confirme o recebimento de mercadorias")
+page_header("🛒 Cadastro de Compras", "Registre novos pedidos e confirme o recebimento de mercadorias")
 
 tab1, tab2, tab3 = st.tabs(["➕ Nova Compra", "✅ Confirmar Recebimento", "📋 Histórico"])
 

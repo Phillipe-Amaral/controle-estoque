@@ -2,8 +2,13 @@ import streamlit as st
 from supabase import create_client
 import pandas as pd
 from datetime import date
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+from utils.tema_iuh import aplicar_tema, sidebar_logo, page_header
 
 st.set_page_config(page_title="Transferências", page_icon="🔄", layout="wide")
+aplicar_tema()
+sidebar_logo("Transferências")
 
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
@@ -54,8 +59,7 @@ def carregar_transferencias():
     return pd.DataFrame(rows, columns=colunas) if rows else pd.DataFrame(columns=colunas)
 
 # ── Título ────────────────────────────────────────────────────────────────────
-st.title("🔄 Transferências entre Parceiros")
-st.caption("Registre e acompanhe movimentações de material entre parceiros")
+page_header("🔄 Transferências entre Parceiros", "Registre e acompanhe movimentações de material entre parceiros")
 
 tab1, tab2, tab3 = st.tabs(["➕ Nova Transferência", "✅ Confirmar Recebimento", "📋 Histórico"])
 

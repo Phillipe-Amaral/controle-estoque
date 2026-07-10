@@ -1,8 +1,13 @@
 import streamlit as st
 from supabase import create_client
 import pandas as pd
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+from utils.tema_iuh import aplicar_tema, sidebar_logo, page_header
 
 st.set_page_config(page_title="Relatório de Baixas", page_icon="📋", layout="wide")
+aplicar_tema()
+sidebar_logo("Relatório de Baixas")
 
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
@@ -63,8 +68,7 @@ def carregar_baixas():
     df["APs"]         = pd.to_numeric(df["APs"],         errors="coerce").fillna(0).astype(int)
     return df
 
-st.title("📋 Relatório de Baixas por Escola")
-st.caption("Itens baixados de estoque por instalação — com INEP para rastreabilidade")
+page_header("📋 Relatório de Baixas por Escola", "Itens baixados de estoque por instalação — com INEP para rastreabilidade")
 
 df_base = carregar_baixas()
 

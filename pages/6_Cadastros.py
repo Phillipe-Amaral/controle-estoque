@@ -1,8 +1,13 @@
 import streamlit as st
 from supabase import create_client
 import pandas as pd
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+from utils.tema_iuh import aplicar_tema, sidebar_logo, page_header
 
 st.set_page_config(page_title="Cadastros", page_icon="📋", layout="wide")
+aplicar_tema()
+sidebar_logo("Cadastros")
 
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
@@ -28,7 +33,7 @@ def carregar_similares():
     r = sb.table("itens_similares").select("*").order("id").execute()
     return pd.DataFrame(r.data) if r.data else pd.DataFrame()
 
-st.title("📋 Cadastros Auxiliares")
+page_header("📋 Cadastros Auxiliares", "")
 
 tab1, tab2 = st.tabs(["🔄 DE/PARA — Itens Adicionais", "🔗 Itens Similares"])
 

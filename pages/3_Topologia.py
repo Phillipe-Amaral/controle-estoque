@@ -2,8 +2,13 @@ import streamlit as st
 from supabase import create_client
 import pandas as pd
 from datetime import date
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+from utils.tema_iuh import aplicar_tema, sidebar_logo, page_header
 
 st.set_page_config(page_title="Topologia", page_icon="🏫", layout="wide")
+aplicar_tema()
+sidebar_logo("Topologia")
 
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
@@ -71,8 +76,7 @@ def carregar_instalacoes():
     return pd.DataFrame(rows, columns=cols) if rows else pd.DataFrame(columns=cols)
 
 # ── Título ────────────────────────────────────────────────────────────────────
-st.title("🏫 Gestão de Topologia")
-st.caption("Cadastre instalações por escola e gere baixas automáticas de estoque via topologia")
+page_header("🏫 Gestão de Topologia", "Cadastre instalações por escola e gere baixas automáticas de estoque via topologia")
 
 tab1, tab2, tab3 = st.tabs(["📐 Consultar Topologia", "➕ Registrar Instalação", "📋 Histórico de Instalações"])
 

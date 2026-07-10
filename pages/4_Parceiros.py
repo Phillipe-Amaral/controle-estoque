@@ -1,8 +1,13 @@
 import streamlit as st
 from supabase import create_client
 import pandas as pd
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+from utils.tema_iuh import aplicar_tema, sidebar_logo, page_header
 
 st.set_page_config(page_title="Parceiros", page_icon="🤝", layout="wide")
+aplicar_tema()
+sidebar_logo("Parceiros")
 
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
@@ -29,8 +34,7 @@ def carregar_parceiros():
         })
     return pd.DataFrame(rows, columns=colunas) if rows else pd.DataFrame(columns=colunas)
 
-st.title("🤝 Cadastro de Parceiros")
-st.caption("Gerencie os parceiros com razão social, nome fantasia e CNPJ")
+page_header("🤝 Cadastro de Parceiros", "Gerencie os parceiros com razão social, nome fantasia e CNPJ")
 
 tab1, tab2 = st.tabs(["📋 Lista de Parceiros", "➕ Novo / Editar Parceiro"])
 

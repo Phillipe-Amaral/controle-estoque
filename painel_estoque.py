@@ -2,6 +2,9 @@ import streamlit as st
 from supabase import create_client
 import pandas as pd
 import plotly.express as px
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+from utils.tema_iuh import aplicar_tema, sidebar_logo, page_header
 
 # ── Configuração ──────────────────────────────────────────────────────────────
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -12,6 +15,7 @@ st.set_page_config(
     page_icon="📦",
     layout="wide",
 )
+aplicar_tema()
 
 # ── Carrega dados ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=60)
@@ -34,7 +38,7 @@ st.sidebar.image(
     "https://em-content.zobj.net/source/microsoft-teams/363/package_1f4e6.png",
     width=60,
 )
-st.sidebar.title("Filtros")
+sidebar_logo("Painel de Estoque")
 
 parceiros_lista = ["Todos"] + sorted(df_base["parceiro"].dropna().unique().tolist())
 fases_lista     = ["Todas"] + sorted(df_base["fase"].dropna().unique().tolist())
@@ -65,8 +69,7 @@ if mostrar_negativos:
     df = df[df["saldo_atual"] < 0]
 
 # ── Título ────────────────────────────────────────────────────────────────────
-st.title("📦 Controle de Estoque — Painel Online")
-st.caption("Fase 4.2 · Saldos calculados em tempo real a partir de compras, instalações e transferências")
+page_header("📦 Controle de Estoque — Painel Online", "Fase 4.2 · Saldos calculados em tempo real a partir de compras, instalações e transferências")
 
 # ── KPIs ──────────────────────────────────────────────────────────────────────
 c1, c2, c3, c4 = st.columns(4)
