@@ -18,6 +18,31 @@ def get_client():
 
 sb = get_client()
 
+# Mapeamento item nome → função (mesmo critério do ETL)
+FUNCAO_MAP = {
+    'AP':           ['EAP', 'DM-AP 610', ' AP ', 'AP 360', 'AP 610', 'AP 1800', 'AP 3620'],
+    'ROTEADOR':     ['ROUTER', 'ROTEADOR', 'ER7212', 'ER605', 'DM-AP GT',
+                     'R3005G', 'R3006G', 'R3010G'],
+    'SWITCH':       ['SWITCH'],
+    'CONTROLADORA': ['OC200', 'OC300', 'CONTROLLER', 'CONTROLADORA'],
+    'INJETOR':      ['INJETOR', 'INJECTOR', 'POE'],
+    'SIMET':        ['SIMET'],
+    'NOBREAK':      ['NOBREAK'],
+    'RACK 5U':      ['RACK 5U'],
+    'RACK 8U':      ['RACK 8U'],
+    'ORGANIZADOR':  ['ORGANIZADOR'],
+    'BANDEJA':      ['BANDEJA'],
+    'CABO':         ['CABO'],
+}
+
+def get_funcao(item_nome):
+    nome = str(item_nome).upper()
+    for funcao, kws in FUNCAO_MAP.items():
+        for kw in kws:
+            if kw in nome:
+                return funcao
+    return 'OUTROS'
+
 def fetch_all(table, cols):
     PAGE = 1000
     rows, offset = [], 0
@@ -35,7 +60,7 @@ def carregar_baixas():
                        "id, parceiro_id, nome_escola, codigo_inep, municipio, uf, kit, fase, fabricante, data_implantacao")
     r_ei   = fetch_all("execucao_itens", "execucao_id, item_id, qtd")
     r_parc = sb.table("parceiros").select("id, nome").execute().data
-    r_item = sb.table("itens").select("id, nome").execute().data
+    r_item = sb.table("itens").select("id, nome, fabricante").execute().data
 
     df_exec = pd.DataFrame(r_exec)
     df_ei   = pd.DataFrame(r_ei)
@@ -47,25 +72,25 @@ def carregar_baixas():
           .merge(df_parc, on="parceiro_id")
           .merge(df_item, on="item_id"))
 
+    df["Função"] = df["item"].apply(get_funcao)
+
     df = df[[
-        "parceiro", "fase", "fabricante", "uf", "municipio",
-        "nome_escola", "codigo_inep", "kit", "item", "qtd", "data_implantacao"
+        "parceiro", "fase", "uf", "municipio",
+        "nome_escola", "codigo_inep", "kit", "Função", "item", "qtd", "data_implantacao"
     ]].rename(columns={
         "parceiro":        "Parceiro",
         "fase":            "Fase",
-        "fabricante":      "Fabricante",
         "uf":              "UF",
         "municipio":       "Município",
         "nome_escola":     "Escola",
         "codigo_inep":     "INEP",
-        "kit":             "APs",
+        "kit":             "Kit",
         "item":            "Item",
         "qtd":             "Qtd Baixada",
         "data_implantacao":"Data",
     })
 
     df["Qtd Baixada"] = pd.to_numeric(df["Qtd Baixada"], errors="coerce").fillna(0).astype(int)
-    df["APs"]         = pd.to_numeric(df["APs"],         errors="coerce").fillna(0).astype(int)
     return df
 
 page_header("📋 Relatório de Baixas por Escola", "Itens baixados de estoque por instalação — com INEP para rastreabilidade")
@@ -76,23 +101,26 @@ df_base = carregar_baixas()
 with st.expander("🔎 Filtros", expanded=True):
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        parc_f = st.selectbox("Parceiro", ["Todos"] + sorted(df_base["Parceiro"].dropna().unique().tolist()))
+        parc_f  = st.selectbox("Parceiro", ["Todos"] + sorted(df_base["Parceiro"].dropna().unique().tolist()))
     with col2:
-        fase_f = st.selectbox("Fase", ["Todas"] + sorted(df_base["Fase"].dropna().unique().tolist()))
+        fase_f  = st.selectbox("Fase", ["Todas"] + sorted(df_base["Fase"].dropna().unique().tolist()))
     with col3:
-        uf_f   = st.selectbox("UF", ["Todas"] + sorted(df_base["UF"].dropna().unique().tolist()))
+        uf_f    = st.selectbox("UF", ["Todas"] + sorted(df_base["UF"].dropna().unique().tolist()))
     with col4:
-        item_f = st.selectbox("Item", ["Todos"] + sorted(df_base["Item"].dropna().unique().tolist()))
+        func_f  = st.selectbox("Função", ["Todas"] + sorted(df_base["Função"].dropna().unique().tolist()))
 
     col5, col6 = st.columns(2)
     with col5:
-        inep_f = st.text_input("Buscar INEP ou Escola")
+        item_f  = st.selectbox("Item específico", ["Todos"] + sorted(df_base["Item"].dropna().unique().tolist()))
+    with col6:
+        inep_f  = st.text_input("Buscar INEP ou Escola")
 
 df = df_base.copy()
-if parc_f != "Todos":   df = df[df["Parceiro"] == parc_f]
-if fase_f != "Todas":   df = df[df["Fase"] == fase_f]
-if uf_f   != "Todas":   df = df[df["UF"] == uf_f]
-if item_f != "Todos":   df = df[df["Item"] == item_f]
+if parc_f != "Todos":  df = df[df["Parceiro"] == parc_f]
+if fase_f != "Todas":  df = df[df["Fase"] == fase_f]
+if uf_f   != "Todas":  df = df[df["UF"] == uf_f]
+if func_f != "Todas":  df = df[df["Função"] == func_f]
+if item_f != "Todos":  df = df[df["Item"] == item_f]
 if inep_f:
     mask = (df["INEP"].astype(str).str.contains(inep_f, case=False, na=False) |
             df["Escola"].str.contains(inep_f, case=False, na=False))
@@ -100,7 +128,7 @@ if inep_f:
 
 # ── KPIs ──────────────────────────────────────────────────────────────────────
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("Escolas únicas",    df["INEP"].nunique())
+k1.metric("Escolas únicas",     df["INEP"].nunique())
 k2.metric("Registros de baixa", len(df))
 k3.metric("Total de unidades",  int(df["Qtd Baixada"].sum()))
 k4.metric("Parceiros",          df["Parceiro"].nunique())
@@ -108,7 +136,7 @@ k4.metric("Parceiros",          df["Parceiro"].nunique())
 st.markdown("---")
 
 # ── Tabela ────────────────────────────────────────────────────────────────────
-st.dataframe(df, use_container_width=True, hide_index=True, height=520)
+st.dataframe(df, use_container_width=True, hide_index=True, height=480)
 
 st.download_button(
     "⬇️ Exportar (.csv)",
@@ -119,10 +147,20 @@ st.download_button(
 
 st.markdown("---")
 
-# ── Resumo por Parceiro × Item ────────────────────────────────────────────────
-st.subheader("Resumo por Parceiro × Fase × Item")
-df_res = (df.groupby(["Parceiro", "Fase", "Item"])["Qtd Baixada"]
-            .sum()
-            .reset_index()
-            .sort_values(["Parceiro", "Fase", "Qtd Baixada"], ascending=[True, True, False]))
-st.dataframe(df_res, use_container_width=True, hide_index=True, height=350)
+# ── Resumo por Parceiro × Fase × Função × Item ────────────────────────────────
+tab1, tab2 = st.tabs(["📊 Por Parceiro × Fase × Item", "🗂️ Por Função"])
+
+with tab1:
+    df_res = (df.groupby(["Parceiro", "Fase", "Função", "Item"])["Qtd Baixada"]
+                .sum()
+                .reset_index()
+                .sort_values(["Parceiro", "Fase", "Função", "Qtd Baixada"],
+                              ascending=[True, True, True, False]))
+    st.dataframe(df_res, use_container_width=True, hide_index=True, height=380)
+
+with tab2:
+    df_func = (df.groupby(["Função", "Item"])["Qtd Baixada"]
+                 .sum()
+                 .reset_index()
+                 .sort_values(["Função", "Qtd Baixada"], ascending=[True, False]))
+    st.dataframe(df_func, use_container_width=True, hide_index=True, height=380)
