@@ -53,7 +53,7 @@ def carregar_consumo_cabo():
     # Execuções (id, fase, inep, parceiro_id)
     exec_rows, offset = [], 0
     while True:
-        r = sb.table('execucoes').select('id,fase,inep,parceiro_id').range(offset, offset + 999).execute()
+        r = sb.table('execucoes').select('id,fase,codigo_inep,parceiro_id').range(offset, offset + 999).execute()
         exec_rows.extend(r.data)
         if len(r.data) < 1000: break
         offset += 1000
@@ -104,7 +104,7 @@ def carregar_consumo_cabo():
 
     # Agrega por parceiro + fase
     grp = df.groupby(['parceiro','fase'], dropna=False).agg(
-        n_escolas  = ('inep',       'nunique'),
+        n_escolas  = ('codigo_inep', 'nunique'),
         total_aps  = ('total_aps',  'sum'),
         total_cabo = ('total_cabo', 'sum'),
     ).reset_index()
