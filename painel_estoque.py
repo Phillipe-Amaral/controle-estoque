@@ -71,8 +71,6 @@ def carregar_consumo_cabo():
         return f
     df_exec['fase'] = df_exec['fase'].apply(norm_fase)
 
-    exec_id_set = set(df_exec['id'].tolist())
-
     # Execucao_itens — APs
     ap_rows, offset = [], 0
     while True:
