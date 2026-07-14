@@ -33,6 +33,87 @@ def carregar_saldo():
 
 df_base = carregar_saldo()
 
+@st.cache_data(ttl=60)
+def carregar_consumo_cabo():
+    sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+    # Itens AP (qualquer item cujo nome contenha as palavras-chave de AP)
+    AP_KWS = ['EAP','AP 3620','AP RW','DM-AP','AP361','AP650','AP613','AP 610']
+    itens_resp = sb.table('itens').select('id,nome').execute().data
+    ap_ids  = [i['id'] for i in itens_resp
+               if any(kw in i['nome'].upper() for kw in AP_KWS)]
+    cabo_ids = [i['id'] for i in itens_resp
+                if i['nome'].upper().strip() == 'CABO'
+                or i['nome'].upper().strip().startswith('CABO ')]
+
+    # Parceiros
+    parc_resp = sb.table('parceiros').select('id,nome').execute().data
+    parc_map  = {p['id']: p['nome'] for p in parc_resp}
+
+    # Execuções (id, fase, inep, parceiro_id)
+    exec_rows, offset = [], 0
+    while True:
+        r = sb.table('execucoes').select('id,fase,inep,parceiro_id').range(offset, offset + 999).execute()
+        exec_rows.extend(r.data)
+        if len(r.data) < 1000: break
+        offset += 1000
+    df_exec = pd.DataFrame(exec_rows).rename(columns={'id': 'execucao_id'})
+    df_exec['parceiro'] = df_exec['parceiro_id'].map(parc_map)
+    df_exec['fase'] = df_exec['fase'].astype(str).str.strip()
+
+    # Normaliza fase para rótulos limpos
+    def norm_fase(f):
+        f = f.upper()
+        if '4.2 ADICIONAL' in f or 'ADICIONAL' in f: return '4.2 Adicional'
+        if '4.2' in f: return '4.2'
+        if '4.1' in f: return '4.1'
+        if '5.0' in f or '5' in f: return '5.0'
+        return f
+    df_exec['fase'] = df_exec['fase'].apply(norm_fase)
+
+    exec_id_set = set(df_exec['id'].tolist())
+
+    # Execucao_itens — APs
+    ap_rows, offset = [], 0
+    while True:
+        r = (sb.table('execucao_itens').select('execucao_id,qtd')
+               .in_('item_id', ap_ids).range(offset, offset + 999).execute())
+        ap_rows.extend(r.data)
+        if len(r.data) < 1000: break
+        offset += 1000
+    df_ap = pd.DataFrame(ap_rows) if ap_rows else pd.DataFrame(columns=['execucao_id','qtd'])
+    df_ap['qtd'] = pd.to_numeric(df_ap['qtd'], errors='coerce').fillna(0)
+    df_ap_sum = df_ap.groupby('execucao_id')['qtd'].sum().reset_index().rename(columns={'qtd':'total_aps'})
+
+    # Execucao_itens — CABO (metros)
+    cabo_rows, offset = [], 0
+    while True:
+        r = (sb.table('execucao_itens').select('execucao_id,qtd')
+               .in_('item_id', cabo_ids).range(offset, offset + 999).execute())
+        cabo_rows.extend(r.data)
+        if len(r.data) < 1000: break
+        offset += 1000
+    df_cabo = pd.DataFrame(cabo_rows) if cabo_rows else pd.DataFrame(columns=['execucao_id','qtd'])
+    df_cabo['qtd'] = pd.to_numeric(df_cabo['qtd'], errors='coerce').fillna(0)
+    df_cabo_sum = df_cabo.groupby('execucao_id')['qtd'].sum().reset_index().rename(columns={'qtd':'total_cabo'})
+
+    # Junta tudo em execuções
+    df = df_exec.merge(df_ap_sum,   on='execucao_id', how='left')
+    df = df.merge(df_cabo_sum, on='execucao_id', how='left')
+    df[['total_aps','total_cabo']] = df[['total_aps','total_cabo']].fillna(0)
+
+    # Agrega por parceiro + fase
+    grp = df.groupby(['parceiro','fase'], dropna=False).agg(
+        n_escolas  = ('inep',       'nunique'),
+        total_aps  = ('total_aps',  'sum'),
+        total_cabo = ('total_cabo', 'sum'),
+    ).reset_index()
+
+    grp['media_ap_por_inep']  = (grp['total_aps']  / grp['n_escolas'].replace(0, pd.NA)).round(2)
+    grp['media_cabo_por_ap']  = (grp['total_cabo'] / grp['total_aps'].replace(0, pd.NA)).round(1)
+
+    return grp
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 st.sidebar.image(
     "https://em-content.zobj.net/source/microsoft-teams/363/package_1f4e6.png",
@@ -163,6 +244,51 @@ with col_graf2:
     )
     fig2.update_layout(margin=dict(l=0, r=0, t=20, b=0))
     st.plotly_chart(fig2, use_container_width=True)
+
+# ── Consumo de cabo por AP ───────────────────────────────────────────────────
+st.markdown("---")
+st.subheader("📡 Consumo de Cabo por AP — por Parceiro e Fase")
+
+df_cabo_ap = carregar_consumo_cabo()
+
+# Aplica os mesmos filtros da sidebar
+df_cabo_fil = df_cabo_ap.copy()
+if parceiro_sel != "Todos":
+    df_cabo_fil = df_cabo_fil[df_cabo_fil["parceiro"] == parceiro_sel]
+if fase_sel != "Todas":
+    df_cabo_fil = df_cabo_fil[df_cabo_fil["fase"] == fase_sel]
+
+df_cabo_show = df_cabo_fil.rename(columns={
+    "parceiro":          "Parceiro",
+    "fase":              "Fase",
+    "n_escolas":         "Escolas (INEPs)",
+    "total_aps":         "Total APs Instalados",
+    "total_cabo":        "Total Cabo (m)",
+    "media_ap_por_inep": "Média APs / INEP",
+    "media_cabo_por_ap": "Média Cabo / AP (m)",
+}).sort_values(["Fase","Parceiro"])
+
+df_cabo_show["Total APs Instalados"] = df_cabo_show["Total APs Instalados"].astype(int)
+df_cabo_show["Total Cabo (m)"]       = df_cabo_show["Total Cabo (m)"].astype(int)
+
+st.dataframe(
+    df_cabo_show,
+    use_container_width=True,
+    hide_index=True,
+    height=min(60 + len(df_cabo_show) * 35, 500),
+    column_config={
+        "Média APs / INEP":    st.column_config.NumberColumn(format="%.2f"),
+        "Média Cabo / AP (m)": st.column_config.NumberColumn(format="%.1f m"),
+        "Total Cabo (m)":      st.column_config.NumberColumn(format="%d m"),
+    }
+)
+
+st.download_button(
+    "⬇️ Exportar consumo cabo (.csv)",
+    data=df_cabo_show.to_csv(index=False).encode("utf-8"),
+    file_name="consumo_cabo_por_ap.csv",
+    mime="text/csv",
+)
 
 # ── Alerta saldo negativo ─────────────────────────────────────────────────────
 df_neg = df_base[df_base["saldo_atual"] < 0][["parceiro", "item", "saldo_atual"]]
