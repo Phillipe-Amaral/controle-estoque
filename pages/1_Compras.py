@@ -83,7 +83,7 @@ with tab1:
             parceiro_sel = st.selectbox("Parceiro *", list(parceiros.keys()))
             item_sel     = st.selectbox("Item *", list(itens_dict.keys()))
             fornecedor   = st.text_input("Fornecedor")
-            fase         = st.selectbox("Fase", ["4.2", "4.1", "5.0"])
+            fase         = st.selectbox("Fase", ["4.1", "4.2", "4.2 ADICIONAL", "5.0"])
         with col2:
             qtd_pedida   = st.number_input("Qtd Pedida *", min_value=1, value=1)
             valor_unit   = st.number_input("Valor Unitário (R$)", min_value=0.0, value=0.0, format="%.2f")

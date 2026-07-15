@@ -80,7 +80,7 @@ with tab1:
         with col1:
             origem_sel  = st.selectbox("Parceiro de Origem *", nomes_parceiros)
             item_sel    = st.selectbox("Item *", list(itens_dict.keys()))
-            fase        = st.selectbox("Fase", ["4.2", "4.1", "5.0"])
+            fase        = st.selectbox("Fase", ["4.1", "4.2", "4.2 ADICIONAL", "5.0"])
         with col2:
             destinos = [p for p in nomes_parceiros if p != origem_sel]
             destino_sel = st.selectbox("Parceiro de Destino *", nomes_parceiros)
