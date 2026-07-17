@@ -280,8 +280,8 @@ with tab_resumo:
     st.subheader("📋 Resumo Operacional — Fase × UF")
     st.caption(
         "Métricas consolidadas de RE e RI por fase e estado. "
-        "Colunas marcadas com '—' requerem classificação Broker/Provedor/Operadora "
-        "do campo `responsavel_re`."
+        "Valores '—' em colunas de custo indicam RE sem classificação (Broker/Provedor/Operadora) "
+        "no campo `classificacao_re`."
     )
 
     # ── Normaliza fase ────────────────────────────────────────────────────────
