@@ -348,13 +348,19 @@ with tab_resumo:
 
     STATUS_RE_INSTALADA = {'ativo', 'instalado com pendência', 'instalado'}
 
+    # Só usa status_circuito_re se a coluna existir E tiver valores não-nulos
+    _use_status_re = (
+        'status_circuito_re' in df_res.columns
+        and df_res['status_circuito_re'].notna().any()
+    )
+
     # ── Computa métricas por (fase, uf) ───────────────────────────────────────
     resumo_cols = {}
     for (fase, uf), col_label in zip(FASE_UF_ORDER, COL_LABELS):
         g = df_res[(df_res['_fase'] == fase) & (df_res['uf'] == uf)]
 
-        # RE instaladas: usa status_circuito_re quando disponível, fallback = data_inst_re
-        if 'status_circuito_re' in g.columns:
+        # RE instaladas: usa status_circuito_re quando disponível e populado, fallback = data_inst_re
+        if _use_status_re:
             _re_status = g['status_circuito_re'].fillna('').astype(str).str.strip().str.lower()
             g_inst_re = g[_re_status.isin(STATUS_RE_INSTALADA)]
         else:
