@@ -129,8 +129,9 @@ page_header(
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab_resumo, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 KPIs Gerais",
+    "📋 Resumo Operacional",
     "🔌 Rede Externa (RE)",
     "📡 Rede Interna (RI)",
     "📋 Relatório por INEP",
@@ -272,6 +273,172 @@ with tab1:
         st.plotly_chart(fig_pz, use_container_width=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
+# ABA RESUMO OPERACIONAL
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_resumo:
+    st.subheader("📋 Resumo Operacional — Fase × UF")
+    st.caption(
+        "Métricas consolidadas de RE e RI por fase e estado. "
+        "Colunas marcadas com '—' requerem classificação Broker/Provedor/Operadora "
+        "do campo `responsavel_re`."
+    )
+
+    # ── Normaliza fase ────────────────────────────────────────────────────────
+    def _norm_fase(f):
+        f = str(f).strip().upper()
+        if '4.2' in f and ('ADICIONAL' in f or f.endswith('AD') or ' AD' in f):
+            return '4.2 AD.'
+        if f.startswith('4.1'): return '4.1'
+        if f.startswith('4.2'): return '4.2'
+        if f.startswith('5'): return '5.0'
+        return f
+
+    df_res = df_all.copy()
+    df_res['_fase'] = df_res['fase'].apply(_norm_fase)
+
+    FASE_UF_ORDER = [
+        ('4.1',    'MG'), ('4.1',    'ES'), ('4.1',    'RJ'), ('4.1',    'SP'),
+        ('4.2',    'MG'), ('4.2',    'ES'), ('4.2',    'RJ'), ('4.2',    'BA'), ('4.2',    'PA'), ('4.2',    'AM'),
+        ('4.2 AD.','AM'), ('4.2 AD.','BA'), ('4.2 AD.','CE'), ('4.2 AD.','MG'), ('4.2 AD.','PA'), ('4.2 AD.','SP'),
+        ('5.0',    'MG'), ('5.0',    'ES'), ('5.0',    'RJ'),
+    ]
+
+    COL_LABELS = [f"{f}\n{u}" for f, u in FASE_UF_ORDER]
+
+    COUNT_METRICS = {
+        "RE's Contratadas", "RE's Instaladas", "RE's Aprovadas",
+        "RI's Contratadas", "RI's Instaladas", "RI's Aprovadas",
+        "Qtd Instalada Broker", "Qtd Instalada Provedor", "Qtd Instalada Operadora",
+        "Qtd de AP's Instalados",
+    }
+
+    METRIC_NAMES = [
+        "RE's Contratadas",
+        "RE's Instaladas",
+        "RE's Aprovadas",
+        "Qtd Instalada Broker",
+        "Qtd Instalada Provedor",
+        "Qtd Instalada Operadora",
+        "Custo Médio Broker Mensal",
+        "Custo Médio Provedor Mensal",
+        "Custo Médio Operadora Mensal",
+        "Custo Médio Broker 24 Meses",
+        "Custo Médio Provedor 24 Meses",
+        "Custo Médio Operadora 24 Meses",
+        "Valor Target RE Mensal (Média)",
+        "Valor Contratado RE Mensal (Média)",
+        "Custo RE Instaladas 24 Meses",
+        "Receita RE Instaladas Instalação",
+        "Receita RE Instaladas Mensalidade",
+        "Receita RE 24 Meses",
+        "RI's Contratadas",
+        "RI's Instaladas",
+        "RI's Aprovadas",
+        "Custo Instalação RI",
+        "Custo Médio Instalação / Escola",
+        "Qtd de AP's Instalados",
+        "Custo Médio Instalação / AP",
+        "Receita De Instalação",
+        "Receita Equipamentos",
+        "Receita Manutenção Mensal",
+        "Receita Total 24 Meses",
+    ]
+    RE_SECTION_END = METRIC_NAMES.index("RI's Contratadas")
+
+    # ── Computa métricas por (fase, uf) ───────────────────────────────────────
+    resumo_cols = {}
+    for (fase, uf), col_label in zip(FASE_UF_ORDER, COL_LABELS):
+        g = df_res[(df_res['_fase'] == fase) & (df_res['uf'] == uf)]
+        g_inst_re = g[g['data_inst_re'].notna()]
+        g_inst_ri = g[g['data_inst_ri'].notna()]
+        n_aprov   = int((g['status_rdo'] == 'RDO Aprovada').sum())
+        aps_total = float(g['aps_ad_impl'].sum())
+        cst_inst_ri = float(g_inst_ri['custo_serv_ri'].sum()) if not g_inst_ri.empty else 0.0
+
+        target_mensal = float(g_inst_re['rec_mens_re_mensal'].mean()) if not g_inst_re.empty else 0.0
+        contratado_mensal = (
+            float(g_inst_re.loc[g_inst_re['custo_mensal_re_real'] > 0, 'custo_mensal_re_real'].mean())
+            if not g_inst_re.empty and (g_inst_re['custo_mensal_re_real'] > 0).any() else 0.0
+        )
+        custo_re_24m = float(
+            g_inst_re['custo_24m_re_real'].where(
+                g_inst_re['custo_24m_re_real'] > 0,
+                g_inst_re['custo_24m_re_orc']
+            ).sum()
+        ) if not g_inst_re.empty else 0.0
+
+        resumo_cols[col_label] = [
+            len(g),           # RE's Contratadas
+            len(g_inst_re),   # RE's Instaladas
+            n_aprov,          # RE's Aprovadas
+            None,             # Qtd Broker
+            None,             # Qtd Provedor
+            None,             # Qtd Operadora
+            None,             # Custo Médio Broker Mensal
+            None,             # Custo Médio Provedor Mensal
+            None,             # Custo Médio Operadora Mensal
+            None,             # Custo Médio Broker 24M
+            None,             # Custo Médio Provedor 24M
+            None,             # Custo Médio Operadora 24M
+            target_mensal,
+            contratado_mensal,
+            custo_re_24m,
+            float(g_inst_re['rec_inst_re_prev'].sum()) if not g_inst_re.empty else 0.0,
+            float(g_inst_re['rec_mens_re_24m'].sum())  if not g_inst_re.empty else 0.0,
+            float((g_inst_re['rec_inst_re_prev'] + g_inst_re['rec_mens_re_24m']).sum()) if not g_inst_re.empty else 0.0,
+            len(g),           # RI's Contratadas
+            len(g_inst_ri),   # RI's Instaladas
+            n_aprov,          # RI's Aprovadas
+            cst_inst_ri,
+            float(g_inst_ri['custo_serv_ri'].mean()) if not g_inst_ri.empty else 0.0,
+            int(aps_total),
+            (cst_inst_ri / aps_total) if aps_total > 0 else 0.0,
+            float(g_inst_ri['rec_serv_ri_real'].sum())  if not g_inst_ri.empty else 0.0,
+            float(g_inst_ri['rec_equip_ri_real'].sum()) if not g_inst_ri.empty else 0.0,
+            float(g['rec_manut_mensal_ri'].sum()),
+            float(g['receita_24m_total_real'].sum()),
+        ]
+
+    df_pivot = pd.DataFrame(resumo_cols, index=METRIC_NAMES)
+
+    # ── Formata células ───────────────────────────────────────────────────────
+    def _fmt_cell(metric, val):
+        if val is None:
+            return "—"
+        if metric in COUNT_METRICS:
+            return f"{int(val):,}".replace(",", ".")
+        if isinstance(val, float) and (pd.isna(val) or val == 0.0):
+            return "—"
+        return fmt_brl(val)
+
+    df_disp = df_pivot.copy().astype(object)
+    for col in df_disp.columns:
+        for idx in df_disp.index:
+            df_disp.loc[idx, col] = _fmt_cell(idx, df_pivot.loc[idx, col])
+
+    # ── Exibe seção RE ────────────────────────────────────────────────────────
+    st.markdown("#### 🌐 Rede Externa (RE)")
+    re_df = df_disp.iloc[:RE_SECTION_END]
+    st.dataframe(re_df, use_container_width=True, height=min(40 * len(re_df) + 38, 600))
+
+    st.markdown("#### 📡 Rede Interna (RI)")
+    ri_df = df_disp.iloc[RE_SECTION_END:]
+    st.dataframe(ri_df, use_container_width=True, height=min(40 * len(ri_df) + 38, 500))
+
+    st.info(
+        "ℹ️ Colunas Broker / Provedor / Operadora exibem '—' "
+        "até que a classificação seja mapeada no campo `responsavel_re`."
+    )
+
+    # ── Exportar resumo ───────────────────────────────────────────────────────
+    st.download_button(
+        "⬇️ Exportar Resumo (.csv)",
+        data=df_disp.reset_index().rename(columns={'index': 'Métrica'}).to_csv(index=False).encode('utf-8'),
+        file_name=f"resumo_operacional_{TODAY}.csv",
+        mime="text/csv",
+    )
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ABA 2 — REDE EXTERNA
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
@@ -401,15 +568,24 @@ with tab4:
 
     col_display = {
         'inep':'INEP','escola':'Escola','uf':'UF','fase':'Fase',
-        'parceiro_ri':'Parceiro RI','responsavel_re':'Responsável RE',
+        'parceiro_ri':'Parceiro RI',
+        'responsavel_re':'Fornecedor RE',
+        'status_rdo':'Status RDO',
         'kit_previsto':'Kit Prev','kit_real':'Kit Real','aps_ad_impl':'APs Ad.',
-        'data_inst_ri':'Inst RI','data_inst_re':'Inst RE','data_rdo':'RDO',
+        'data_inst_ri':'Inst RI','data_inst_re':'Inst RE','data_rdo':'Data RDO Aceite',
+        # RE — valores
+        'rec_mens_re_mensal':'Mens. RE (LPU)',
+        'custo_mensal_re_real':'Valor Contratado RE/mês',
+        'rec_inst_re_prev':'Receita Inst RE (LPU)',
+        'rec_mens_re_24m':'Receita Mens RE 24M',
+        'custo_inst_re_real':'Custo Inst RE Real',
+        'custo_24m_re_orc':'Custo RE 24M Orç','custo_24m_re_real':'Custo RE 24M Real',
+        # RI — valores
         'rec_equip_ri_prev':'Rec Equip RI Prev','rec_serv_ri_prev':'Rec Serv RI Prev',
         'rec_manut_24m_ri':'Manut 24M RI',
-        'rec_inst_re_prev':'Inst RE Prev','rec_mens_re_24m':'Mensalidade RE 24M',
         'rec_equip_ri_real':'Rec Equip RI Real','rec_serv_ri_real':'Rec Serv RI Real',
         'custo_serv_ri':'Custo Serv RI','custo_equip_cmv':'CMV RI',
-        'custo_24m_re_orc':'Custo RE 24M Orç','custo_24m_re_real':'Custo RE 24M Real',
+        # Resumo
         'receita_parcial':'Rec Parcial','custo_parcial':'Custo Parcial',
         'margem_parcial':'Margem Parcial','status_parcial':'Status',
         'receita_24m_total_real':'Rec 24M Real','custo_24m_total_real':'Custo 24M Real',
@@ -418,7 +594,7 @@ with tab4:
     existing = {k:v for k,v in col_display.items() if k in df_f.columns}
     df_show = df_f[list(existing.keys())].rename(columns=existing).copy()
 
-    for dc in ['Inst RI','Inst RE','RDO']:
+    for dc in ['Inst RI','Inst RE','Data RDO Aceite']:
         if dc in df_show.columns:
             col_dt = pd.to_datetime(df_show[dc], errors='coerce')
             df_show[dc] = col_dt.dt.strftime('%d/%m/%Y').where(col_dt.notna(), '')
