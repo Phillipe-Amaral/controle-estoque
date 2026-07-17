@@ -367,19 +367,39 @@ with tab_resumo:
             ).sum()
         ) if not g_inst_re.empty else 0.0
 
+        # ── Broker / Provedor / Operadora (via classificacao_re) ─────────────
+        has_classif = 'classificacao_re' in g.columns
+        def _qtd_tipo(tipo):
+            if not has_classif: return None
+            return int((g_inst_re['classificacao_re'].str.strip().str.lower() == tipo.lower()).sum())
+
+        def _custo_medio_mensal(tipo):
+            if not has_classif: return None
+            mask = g_inst_re['classificacao_re'].str.strip().str.lower() == tipo.lower()
+            sub = g_inst_re[mask & (g_inst_re['custo_mensal_re_real'] > 0)]
+            return float(sub['custo_mensal_re_real'].mean()) if not sub.empty else None
+
+        def _custo_medio_24m(tipo):
+            if not has_classif: return None
+            mask = g_inst_re['classificacao_re'].str.strip().str.lower() == tipo.lower()
+            sub = g_inst_re[mask]
+            custo = sub['custo_24m_re_real'].where(sub['custo_24m_re_real'] > 0, sub['custo_24m_re_orc'])
+            n = len(sub)
+            return float(custo.sum() / n) if n > 0 else None
+
         resumo_cols[col_label] = [
             len(g),           # RE's Contratadas
             len(g_inst_re),   # RE's Instaladas
             n_aprov,          # RE's Aprovadas
-            None,             # Qtd Broker
-            None,             # Qtd Provedor
-            None,             # Qtd Operadora
-            None,             # Custo Médio Broker Mensal
-            None,             # Custo Médio Provedor Mensal
-            None,             # Custo Médio Operadora Mensal
-            None,             # Custo Médio Broker 24M
-            None,             # Custo Médio Provedor 24M
-            None,             # Custo Médio Operadora 24M
+            _qtd_tipo('Broker'),
+            _qtd_tipo('Provedor'),
+            _qtd_tipo('Operadora'),
+            _custo_medio_mensal('Broker'),
+            _custo_medio_mensal('Provedor'),
+            _custo_medio_mensal('Operadora'),
+            _custo_medio_24m('Broker'),
+            _custo_medio_24m('Provedor'),
+            _custo_medio_24m('Operadora'),
             target_mensal,
             contratado_mensal,
             custo_re_24m,
@@ -406,7 +426,10 @@ with tab_resumo:
         if val is None:
             return "—"
         if metric in COUNT_METRICS:
-            return f"{int(val):,}".replace(",", ".")
+            try:
+                return f"{int(val):,}".replace(",", ".")
+            except (TypeError, ValueError):
+                return "—"
         if isinstance(val, float) and (pd.isna(val) or val == 0.0):
             return "—"
         return fmt_brl(val)
@@ -425,10 +448,11 @@ with tab_resumo:
     ri_df = df_disp.iloc[RE_SECTION_END:]
     st.dataframe(ri_df, use_container_width=True, height=min(40 * len(ri_df) + 38, 500))
 
-    st.info(
-        "ℹ️ Colunas Broker / Provedor / Operadora exibem '—' "
-        "até que a classificação seja mapeada no campo `responsavel_re`."
-    )
+    if 'classificacao_re' not in df_all.columns or df_all['classificacao_re'].isna().all():
+        st.info(
+            "ℹ️ Execute `construir_modelo_financeiro.py` para popular a classificação "
+            "Broker / Provedor / Operadora (coluna `classificacao_re`)."
+        )
 
     # ── Exportar resumo ───────────────────────────────────────────────────────
     st.download_button(
@@ -569,7 +593,9 @@ with tab4:
     col_display = {
         'inep':'INEP','escola':'Escola','uf':'UF','fase':'Fase',
         'parceiro_ri':'Parceiro RI',
-        'responsavel_re':'Fornecedor RE',
+        'responsavel_re':'Resp. RE (IUH)',
+        'fornecedor_re':'Fornecedor RE',
+        'classificacao_re':'Tipo (Broker/Prov/Op)',
         'status_rdo':'Status RDO',
         'kit_previsto':'Kit Prev','kit_real':'Kit Real','aps_ad_impl':'APs Ad.',
         'data_inst_ri':'Inst RI','data_inst_re':'Inst RE','data_rdo':'Data RDO Aceite',
