@@ -369,19 +369,22 @@ with tab_resumo:
 
         # ── Broker / Provedor / Operadora (via classificacao_re) ─────────────
         has_classif = 'classificacao_re' in g.columns
+        def _classif_col(df):
+            return df['classificacao_re'].fillna('').astype(str).str.strip().str.lower()
+
         def _qtd_tipo(tipo):
-            if not has_classif: return None
-            return int((g_inst_re['classificacao_re'].str.strip().str.lower() == tipo.lower()).sum())
+            if not has_classif or g_inst_re.empty: return None
+            return int((_classif_col(g_inst_re) == tipo.lower()).sum())
 
         def _custo_medio_mensal(tipo):
-            if not has_classif: return None
-            mask = g_inst_re['classificacao_re'].str.strip().str.lower() == tipo.lower()
+            if not has_classif or g_inst_re.empty: return None
+            mask = _classif_col(g_inst_re) == tipo.lower()
             sub = g_inst_re[mask & (g_inst_re['custo_mensal_re_real'] > 0)]
             return float(sub['custo_mensal_re_real'].mean()) if not sub.empty else None
 
         def _custo_medio_24m(tipo):
-            if not has_classif: return None
-            mask = g_inst_re['classificacao_re'].str.strip().str.lower() == tipo.lower()
+            if not has_classif or g_inst_re.empty: return None
+            mask = _classif_col(g_inst_re) == tipo.lower()
             sub = g_inst_re[mask]
             custo = sub['custo_24m_re_real'].where(sub['custo_24m_re_real'] > 0, sub['custo_24m_re_orc'])
             n = len(sub)
