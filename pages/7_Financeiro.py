@@ -345,14 +345,24 @@ with tab_resumo:
     ]
     RE_SECTION_END = METRIC_NAMES.index("RI's Contratadas")
 
+    STATUS_RE_INSTALADA = {'ativo', 'instalado com pendência', 'instalado'}
+
     # ── Computa métricas por (fase, uf) ───────────────────────────────────────
     resumo_cols = {}
     for (fase, uf), col_label in zip(FASE_UF_ORDER, COL_LABELS):
         g = df_res[(df_res['_fase'] == fase) & (df_res['uf'] == uf)]
-        g_inst_re = g[g['data_inst_re'].notna()]
-        g_inst_ri = g[g['data_inst_ri'].notna()]
-        n_aprov   = int((g['status_rdo'] == 'RDO Aprovada').sum())
-        aps_total = float(g['aps_ad_impl'].sum())
+
+        # RE instaladas: usa status_circuito_re quando disponível, fallback = data_inst_re
+        if 'status_circuito_re' in g.columns:
+            _re_status = g['status_circuito_re'].fillna('').astype(str).str.strip().str.lower()
+            g_inst_re = g[_re_status.isin(STATUS_RE_INSTALADA)]
+        else:
+            g_inst_re = g[g['data_inst_re'].notna()]
+
+        g_inst_ri   = g[g['data_inst_ri'].notna()]
+        n_aprov_re  = int((g_inst_re['status_rdo'] == 'RDO Aprovada').sum()) if not g_inst_re.empty else 0
+        n_aprov_ri  = int((g_inst_ri['status_rdo'] == 'RDO Aprovada').sum()) if not g_inst_ri.empty else 0
+        aps_total   = float(g['aps_ad_impl'].sum())
         cst_inst_ri = float(g_inst_ri['custo_serv_ri'].sum()) if not g_inst_ri.empty else 0.0
 
         target_mensal = float(g_inst_re['rec_mens_re_mensal'].mean()) if not g_inst_re.empty else 0.0
@@ -393,7 +403,7 @@ with tab_resumo:
         resumo_cols[col_label] = [
             len(g),           # RE's Contratadas
             len(g_inst_re),   # RE's Instaladas
-            n_aprov,          # RE's Aprovadas
+            n_aprov_re,       # RE's Aprovadas
             _qtd_tipo('Broker'),
             _qtd_tipo('Provedor'),
             _qtd_tipo('Operadora'),
@@ -411,7 +421,7 @@ with tab_resumo:
             float((g_inst_re['rec_inst_re_prev'] + g_inst_re['rec_mens_re_24m']).sum()) if not g_inst_re.empty else 0.0,
             len(g),           # RI's Contratadas
             len(g_inst_ri),   # RI's Instaladas
-            n_aprov,          # RI's Aprovadas
+            n_aprov_ri,       # RI's Aprovadas
             cst_inst_ri,
             float(g_inst_ri['custo_serv_ri'].mean()) if not g_inst_ri.empty else 0.0,
             int(aps_total),
