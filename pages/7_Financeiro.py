@@ -330,6 +330,7 @@ with tab_resumo:
         "Custo RE Instaladas 24 Meses",
         "Receita RE Instaladas Instalação",
         "Receita RE Instaladas Mensalidade",
+        "Receita RE Instaladas Mensalidade (Média)",
         "Receita RE 24 Meses",
         "RI's Contratadas",
         "RI's Instaladas",
@@ -365,10 +366,18 @@ with tab_resumo:
         aps_total   = float(g['aps_ad_impl'].sum())
         cst_inst_ri = float(g_inst_ri['custo_serv_ri'].sum()) if not g_inst_ri.empty else 0.0
 
-        target_mensal = float(g_inst_re['rec_mens_re_mensal'].mean()) if not g_inst_re.empty else 0.0
+        # Target = custo orçado médio (benchmark de mercado); Contratado = custo real negociado
+        target_mensal = (
+            float(g_inst_re.loc[g_inst_re['custo_mensal_re_orc'] > 0, 'custo_mensal_re_orc'].mean())
+            if not g_inst_re.empty and (g_inst_re['custo_mensal_re_orc'] > 0).any() else 0.0
+        )
         contratado_mensal = (
             float(g_inst_re.loc[g_inst_re['custo_mensal_re_real'] > 0, 'custo_mensal_re_real'].mean())
             if not g_inst_re.empty and (g_inst_re['custo_mensal_re_real'] > 0).any() else 0.0
+        )
+        rec_mens_media = (
+            float(g_inst_re['rec_mens_re_mensal'].mean())
+            if not g_inst_re.empty and (g_inst_re['rec_mens_re_mensal'] > 0).any() else 0.0
         )
         custo_re_24m = float(
             g_inst_re['custo_24m_re_real'].where(
@@ -418,6 +427,7 @@ with tab_resumo:
             custo_re_24m,
             float(g_inst_re['rec_inst_re_prev'].sum()) if not g_inst_re.empty else 0.0,
             float(g_inst_re['rec_mens_re_24m'].sum())  if not g_inst_re.empty else 0.0,
+            rec_mens_media,
             float((g_inst_re['rec_inst_re_prev'] + g_inst_re['rec_mens_re_24m']).sum()) if not g_inst_re.empty else 0.0,
             len(g),           # RI's Contratadas
             len(g_inst_ri),   # RI's Instaladas
