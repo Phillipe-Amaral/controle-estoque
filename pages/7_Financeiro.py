@@ -423,16 +423,17 @@ with tab_resumo:
 
     # ── Formata células ───────────────────────────────────────────────────────
     def _fmt_cell(metric, val):
-        if val is None:
+        try:
+            fval = float(val)
+        except Exception:
+            return "—"
+        if pd.isna(fval):
             return "—"
         if metric in COUNT_METRICS:
-            try:
-                return f"{int(val):,}".replace(",", ".")
-            except (TypeError, ValueError):
-                return "—"
-        if isinstance(val, float) and (pd.isna(val) or val == 0.0):
+            return f"{int(fval):,}".replace(",", ".")
+        if fval == 0.0:
             return "—"
-        return fmt_brl(val)
+        return fmt_brl(fval)
 
     df_disp = df_pivot.copy().astype(object)
     for col in df_disp.columns:
