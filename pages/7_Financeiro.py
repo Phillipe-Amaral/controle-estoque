@@ -37,7 +37,8 @@ def carregar_financeiro():
             df[c] = pd.to_datetime(df[c], errors='coerce')
     num_cols = [c for c in df.columns if c not in
                 ['inep','escola','uf','municipio','fase','lote','parceiro_ri',
-                 'responsavel_re','kit_previsto','kit_real','status_parcial','status_rdo','updated_at']]
+                 'responsavel_re','fornecedor_re','classificacao_re','status_circuito_re',
+                 'kit_previsto','kit_real','status_parcial','status_rdo','updated_at']]
     for c in num_cols:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
@@ -346,7 +347,7 @@ with tab_resumo:
     ]
     RE_SECTION_END = METRIC_NAMES.index("RI's Contratadas")
 
-    STATUS_RE_INSTALADA = {'ativo', 'instalado com pendência', 'instalado'}
+    STATUS_RE_INSTALADA = {'ativo', 'instalado com pendência', 'instalado', 'circuito com contrato fechado'}
 
     # Só usa status_circuito_re se a coluna existir E tiver valores não-nulos
     _use_status_re = (
