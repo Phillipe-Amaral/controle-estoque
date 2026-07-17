@@ -107,6 +107,51 @@ def carregar_consumo_cabo():
 
     return grp
 
+@st.cache_data(ttl=60)
+def carregar_financeiro_estoque():
+    sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+    parc_rows = sb.table("parceiros").select("id,nome").execute().data
+    item_rows = sb.table("itens").select("id,nome").execute().data
+    parc_map  = {p["id"]: p["nome"] for p in parc_rows}
+    item_map  = {i["id"]: i["nome"] for i in item_rows}
+
+    # Compras: valor comprado = qtd_recebida × valor_unitario
+    comp = sb.table("compras").select(
+        "parceiro_id,item_id,fase,qtd_recebida,valor_unitario"
+    ).execute().data
+    df_c = pd.DataFrame(comp) if comp else pd.DataFrame(
+        columns=["parceiro_id","item_id","fase","qtd_recebida","valor_unitario"])
+    df_c["qtd_recebida"]  = pd.to_numeric(df_c["qtd_recebida"],  errors="coerce").fillna(0)
+    df_c["valor_unitario"]= pd.to_numeric(df_c["valor_unitario"], errors="coerce").fillna(0)
+    df_c["valor_comprado"]= df_c["qtd_recebida"] * df_c["valor_unitario"]
+    df_c["parceiro"]      = df_c["parceiro_id"].map(parc_map)
+    df_c["item"]          = df_c["item_id"].map(item_map)
+    df_c["fase"]          = df_c["fase"].astype(str).str.strip()
+
+    # Custo médio por (item_id, fase) — usado para valorizar saldo e transferências
+    def _wmean(g):
+        tot_qtd = g["qtd_recebida"].sum()
+        return (g["valor_comprado"].sum() / tot_qtd) if tot_qtd > 0 else 0.0
+    unit_cost = df_c.groupby(["item_id","fase"]).apply(_wmean).to_dict()
+
+    # Transferências: valoriza com custo médio do item
+    transf = sb.table("transferencias").select(
+        "parceiro_origem_id,parceiro_destino_id,item_id,qtd,fase,status"
+    ).execute().data
+    df_t = pd.DataFrame(transf) if transf else pd.DataFrame(
+        columns=["parceiro_origem_id","parceiro_destino_id","item_id","qtd","fase","status"])
+    df_t["qtd"] = pd.to_numeric(df_t["qtd"], errors="coerce").fillna(0)
+    df_t["fase"] = df_t["fase"].astype(str).str.strip()
+    df_t["custo_unit"] = df_t.apply(
+        lambda r: unit_cost.get((r["item_id"], r["fase"]),
+                  unit_cost.get((r["item_id"], ""), 0.0)), axis=1)
+    df_t["valor_transf"] = df_t["qtd"] * df_t["custo_unit"]
+    df_t["origem"]  = df_t["parceiro_origem_id"].map(parc_map)
+    df_t["destino"] = df_t["parceiro_destino_id"].map(parc_map)
+
+    return df_c, df_t, unit_cost
+
 df_base = carregar_saldo()
 parc_uf = carregar_parceiros_uf()
 
@@ -424,3 +469,146 @@ if not df_neg.empty:
         df_neg.rename(columns={"parceiro":"Parceiro","item":"Item","fase":"Fase","saldo_atual":"Saldo"}),
         use_container_width=True, hide_index=True
     )
+
+# ═════════════════════════════════════════════════════════════════════════════
+# VISÃO 4 — VALORES FINANCEIROS
+# ═════════════════════════════════════════════════════════════════════════════
+st.markdown("---")
+st.markdown("### 💰 Visão Financeira do Estoque")
+st.caption("Valores em R$ calculados a partir das compras registradas (qtd recebida × valor unitário)")
+
+df_comp, df_transf, _unit_cost = carregar_financeiro_estoque()
+
+def fmt_brl(v):
+    return f"R$ {float(v):,.0f}".replace(",","X").replace(".",",").replace("X",".")
+
+FASES_ORDEM = ["4.1", "4.2", "4.2 ADICIONAL", "5.0"]
+
+# ── 4 KPIs: total adquirido por fase ─────────────────────────────────────────
+st.subheader("Total Adquirido por Fase")
+kpi_cols = st.columns(len(FASES_ORDEM))
+for col, fase in zip(kpi_cols, FASES_ORDEM):
+    if df_comp.empty:
+        total = 0.0
+    else:
+        mask = df_comp["fase"].str.upper().str.strip() == fase.upper()
+        total = float(df_comp.loc[mask, "valor_comprado"].sum())
+    col.metric(f"Fase {fase}", fmt_brl(total))
+
+st.markdown("---")
+
+# ── Tabela: valor comprado por parceiro × fase ────────────────────────────────
+st.subheader("Valor Comprado por Parceiro e Fase")
+if df_comp.empty:
+    st.info("Nenhuma compra registrada.")
+else:
+    # Aplica filtro de parceiro e fase da sidebar (se selecionados)
+    df_cmp_f = df_comp.copy()
+    if parceiro_sel != "Todos":
+        df_cmp_f = df_cmp_f[df_cmp_f["parceiro"] == parceiro_sel]
+    if fase_sel != "Todas":
+        df_cmp_f = df_cmp_f[df_cmp_f["fase"] == fase_sel]
+
+    df_cmp_grp = (
+        df_cmp_f.groupby(["parceiro","fase"])["valor_comprado"]
+        .sum().reset_index()
+        .rename(columns={"parceiro":"Parceiro","fase":"Fase","valor_comprado":"Valor Comprado"})
+        .sort_values(["Fase","Valor Comprado"], ascending=[True, False])
+    )
+    total_comp = df_cmp_grp["Valor Comprado"].sum()
+    df_cmp_show = df_cmp_grp.copy()
+    df_cmp_show["Valor Comprado"] = df_cmp_show["Valor Comprado"].apply(fmt_brl)
+    st.dataframe(df_cmp_show, use_container_width=True, hide_index=True,
+                 height=min(60 + len(df_cmp_show)*35, 380))
+    st.caption(f"**Total comprado (filtro atual): {fmt_brl(total_comp)}**")
+    st.download_button("⬇️ Exportar compras (.csv)",
+                       data=df_cmp_grp.to_csv(index=False).encode("utf-8"),
+                       file_name="valor_comprado.csv", mime="text/csv")
+
+st.markdown("---")
+
+# ── Tabela: valor transferido por origem → destino ────────────────────────────
+st.subheader("Valor Transferido entre Parceiros")
+if df_transf.empty:
+    st.info("Nenhuma transferência registrada.")
+else:
+    df_trf_f = df_transf.copy()
+    if parceiro_sel != "Todos":
+        df_trf_f = df_trf_f[
+            (df_trf_f["origem"] == parceiro_sel) | (df_trf_f["destino"] == parceiro_sel)
+        ]
+    if fase_sel != "Todas":
+        df_trf_f = df_trf_f[df_trf_f["fase"] == fase_sel]
+
+    df_trf_grp = (
+        df_trf_f.groupby(["origem","destino","fase"])["valor_transf"]
+        .sum().reset_index()
+        .rename(columns={"origem":"Origem","destino":"Destino",
+                         "fase":"Fase","valor_transf":"Valor Transferido"})
+        .sort_values("Valor Transferido", ascending=False)
+    )
+    total_trf = df_trf_grp["Valor Transferido"].sum()
+    df_trf_show = df_trf_grp.copy()
+    df_trf_show["Valor Transferido"] = df_trf_show["Valor Transferido"].apply(fmt_brl)
+    st.dataframe(df_trf_show, use_container_width=True, hide_index=True,
+                 height=min(60 + len(df_trf_show)*35, 320))
+    st.caption(f"**Total transferido (filtro atual): {fmt_brl(total_trf)}**")
+    st.download_button("⬇️ Exportar transferências (.csv)",
+                       data=df_trf_grp.to_csv(index=False).encode("utf-8"),
+                       file_name="valor_transferido.csv", mime="text/csv")
+
+st.markdown("---")
+
+# ── Tabela: valor em estoque (saldo × custo médio) ────────────────────────────
+st.subheader("Valor em Estoque (Saldo Atual × Custo Médio)")
+if df_comp.empty:
+    st.info("Sem preços cadastrados para valorizar o estoque.")
+else:
+    # Custo médio por (item, fase) — chave legível para merge com vw_saldo
+    df_preco = (df_comp[df_comp["valor_unitario"] > 0]
+                .groupby(["item","fase"])
+                .apply(lambda g: (g["valor_comprado"].sum() / g["qtd_recebida"].sum())
+                                  if g["qtd_recebida"].sum() > 0 else 0.0)
+                .reset_index(name="custo_medio"))
+
+    # Aplica filtros da sidebar ao saldo base
+    df_sal_f = df_base.copy()
+    if parceiro_sel != "Todos":
+        df_sal_f = df_sal_f[df_sal_f["parceiro"] == parceiro_sel]
+    if fase_sel != "Todas":
+        df_sal_f = df_sal_f[df_sal_f["fase"] == fase_sel]
+    if fabr_sel != "Todos":
+        df_sal_f = df_sal_f[df_sal_f["fabricante"] == fabr_sel]
+    if item_sel != "Todos":
+        df_sal_f = df_sal_f[df_sal_f["item"] == item_sel]
+
+    df_val = df_sal_f.merge(df_preco, on=["item","fase"], how="left")
+    df_val["custo_medio"] = df_val["custo_medio"].fillna(0)
+    df_val["valor_em_estoque"] = df_val["saldo_atual"] * df_val["custo_medio"]
+
+    df_val_show = df_val[["parceiro","item","fabricante","fase",
+                           "saldo_atual","custo_medio","valor_em_estoque"]].copy()
+    df_val_show = df_val_show.rename(columns={
+        "parceiro":"Parceiro","item":"Item","fabricante":"Fabricante","fase":"Fase",
+        "saldo_atual":"Saldo (un)","custo_medio":"Custo Médio (R$)","valor_em_estoque":"Valor em Estoque",
+    }).sort_values(["Fase","Parceiro"])
+
+    total_estoque = df_val["valor_em_estoque"].sum()
+
+    def colorir_fin(val):
+        if isinstance(val, (int,float)) and val < 0:
+            return "color:#9c0006; font-weight:bold"
+        return ""
+
+    df_val_fmt = df_val_show.copy()
+    df_val_fmt["Custo Médio (R$)"] = df_val_fmt["Custo Médio (R$)"].apply(
+        lambda v: fmt_brl(v) if v > 0 else "—")
+    df_val_fmt["Valor em Estoque"] = df_val_fmt["Valor em Estoque"].apply(fmt_brl)
+
+    st.dataframe(df_val_fmt.style.map(colorir_fin, subset=["Saldo (un)"]),
+                 use_container_width=True, hide_index=True,
+                 height=min(60 + len(df_val_fmt)*35, 420))
+    st.caption(f"**Valor total em estoque (filtro atual): {fmt_brl(total_estoque)}**")
+    st.download_button("⬇️ Exportar estoque valorizado (.csv)",
+                       data=df_val_show.to_csv(index=False).encode("utf-8"),
+                       file_name="estoque_valorizado.csv", mime="text/csv")
