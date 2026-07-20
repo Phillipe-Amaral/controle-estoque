@@ -38,7 +38,8 @@ def carregar_financeiro():
     num_cols = [c for c in df.columns if c not in
                 ['inep','escola','uf','municipio','fase','lote','parceiro_ri',
                  'responsavel_re','fornecedor_re','classificacao_re','status_circuito_re',
-                 'kit_previsto','kit_real','status_parcial','status_rdo','updated_at']]
+                 'kit_previsto','kit_real','status_parcial','status_rdo','updated_at',
+                 'data_inst_ri','data_manut_ri','data_inst_re','data_rdo']]
     for c in num_cols:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
@@ -296,6 +297,13 @@ with tab_resumo:
 
     df_res = df_all.copy()
     df_res['_fase'] = df_res['fase'].apply(_norm_fase)
+    # Total de APs = kit (número do modelo = qtd APs) + APs adicionais
+    import re as _re
+    df_res['_kit_num'] = (
+        df_res['kit_real'].astype(str)
+        .str.extract(r'KIT\s+0*(\d+)', expand=False)
+        .astype(float).fillna(0)
+    )
 
     FASE_UF_ORDER = [
         ('4.1',    'MG'), ('4.1',    'ES'), ('4.1',    'RJ'), ('4.1',    'SP'),
@@ -360,8 +368,11 @@ with tab_resumo:
     for (fase, uf), col_label in zip(FASE_UF_ORDER, COL_LABELS):
         g = df_res[(df_res['_fase'] == fase) & (df_res['uf'] == uf)]
 
-        # RE instaladas: usa status_circuito_re quando disponível e populado, fallback = data_inst_re
-        if _use_status_re:
+        # 4.2 ADICIONAL é projeto só de RI — RE não existe nessa fase
+        is_adicional = fase.startswith('4.2 AD')
+        if is_adicional:
+            g_inst_re = g.iloc[0:0]  # empty
+        elif _use_status_re:
             _re_status = g['status_circuito_re'].fillna('').astype(str).str.strip().str.lower()
             g_inst_re = g[_re_status.isin(STATUS_RE_INSTALADA)]
         else:
@@ -370,7 +381,8 @@ with tab_resumo:
         g_inst_ri   = g[g['data_inst_ri'].notna()]
         n_aprov_re  = int((g_inst_re['status_rdo'] == 'RDO Aprovada').sum()) if not g_inst_re.empty else 0
         n_aprov_ri  = int((g_inst_ri['status_rdo'] == 'RDO Aprovada').sum()) if not g_inst_ri.empty else 0
-        aps_total   = float(g['aps_ad_impl'].sum())
+        # APs total = APs do kit (número do modelo) + APs adicionais implementados
+        aps_total   = float(g['_kit_num'].sum() + g['aps_ad_impl'].sum())
         cst_inst_ri = float(g_inst_ri['custo_serv_ri'].sum()) if not g_inst_ri.empty else 0.0
 
         # Target = custo orçado médio (benchmark de mercado); Contratado = custo real negociado
@@ -417,8 +429,8 @@ with tab_resumo:
             return float(custo.sum() / n) if n > 0 else None
 
         resumo_cols[col_label] = [
-            len(g),           # RE's Contratadas
-            len(g_inst_re),   # RE's Instaladas
+            0 if is_adicional else len(g),  # RE's Contratadas
+            len(g_inst_re),                 # RE's Instaladas
             n_aprov_re,       # RE's Aprovadas
             _qtd_tipo('Broker'),
             _qtd_tipo('Provedor'),
