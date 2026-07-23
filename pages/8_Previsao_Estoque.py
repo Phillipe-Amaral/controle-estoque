@@ -21,11 +21,11 @@ STATUS_SUSPENSO   = {'Em Reforma', 'Cancelado', 'Suspenso'}
 
 def _norm_fase(f):
     f = str(f).strip().upper()
-    if 'ADICIONAL' in f: return '4.2 ADICIONAL'
-    if '5.0' in f or 'FASE 2' in f or 'FASE 3' in f or 'FASE 4' in f: return '5.0'
+    if 'ADIC' in f: return '4.2 ADICIONAL'
+    if '5.0' in f or 'KONEKTA' in f or 'FASE 2' in f or 'FASE 3' in f or 'FASE 4' in f or 'FASE 5' in f: return '5.0'
     if '4.2' in f: return '4.2'
     if '4.1' in f or 'FASE 1' in f: return '4.1'
-    if 'SATÉLITE' in f or 'SATELITE' in f or 'SATELI' in f: return 'SATÉLITE'
+    if 'SAT' in f: return 'SATÉLITE'
     return f
 
 # ─────────────────────────────────────────────────────────────────────────────
