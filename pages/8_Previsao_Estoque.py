@@ -75,20 +75,38 @@ def load_exec():
 def _item_to_funcao(nome):
     """Normaliza nome do item (vw_saldo) para funcao da topologia."""
     n = str(nome).upper().strip()
-    if 'POE' in n or 'INJETOR' in n:   return 'INJETOR'
-    if 'CABO' in n:                     return 'CABO'
-    if 'NOBREAK' in n:                  return 'NOBREAK'
-    if 'RACK 5U' in n:                  return 'RACK 5U'
-    if 'RACK 8U' in n:                  return 'RACK 8U'
-    if 'RACK OUT' in n:                 return 'RACK OUTDOOR'
-    if 'BANDEJA' in n:                  return 'BANDEJA'
-    if 'ORGANIZ' in n:                  return 'ORGANIZADOR'
-    if 'SWITCH' in n:                   return 'SWITCH'
-    if 'VENTIL' in n:                   return 'VENTILADORES'
-    if 'SIMET' in n:                    return 'SIMET'
-    if 'CONTROLADORA' in n:             return 'CONTROLADORA'
-    if 'AP' in n or 'ACCESS' in n or 'ROTEADOR EMPRESARIAL' in n: return 'AP'
-    if 'ROTEADOR' in n or 'GATEWAY' in n: return 'ROTEADOR'
+    # Fixos estruturais
+    if 'NOBREAK' in n:                          return 'NOBREAK'
+    if 'RACK OUT' in n:                         return 'RACK OUTDOOR'
+    if 'RACK 5U' in n:                          return 'RACK 5U'
+    if 'RACK 8U' in n:                          return 'RACK 8U'
+    if 'BANDEJA' in n:                          return 'BANDEJA'
+    if 'ORGANIZ' in n:                          return 'ORGANIZADOR'
+    if 'CABO' in n:                             return 'CABO'
+    if 'VENTIL' in n or 'PORCA' in n:           return 'VENTILADORES'
+    if 'CONTROLADORA' in n:                     return 'CONTROLADORA'
+    if 'SIMET' in n:                            return 'SIMET'
+    # Switches — verificar antes de AP (alguns nomes têm ambos)
+    if 'SWITCH' in n:                           return 'SWITCH'
+    if re.search(r'\bSG\d{4}', n):              return 'SWITCH'   # SG3428MP, SG2016P
+    if re.search(r'\bES\d{3}', n):              return 'SWITCH'   # ES210GMP
+    if re.search(r'S2[23]\d{2}', n):            return 'SWITCH'   # S2328G, S220
+    if re.search(r'\bS210\b', n):               return 'SWITCH'   # HUAWEI S210
+    # Injetores PoE (antes de AP pois POE160S tem "POE")
+    if 'INJETOR' in n:                          return 'INJETOR'
+    if re.search(r'POE\d', n):                  return 'INJETOR'  # POE160S, etc.
+    if n in ('INTELBRAS POE',):                 return 'INJETOR'
+    # Roteadores (ROUTER = inglês, ER series TP-Link, AR series Huawei)
+    if 'ROUTER' in n or 'ROTEADOR' in n:        return 'ROTEADOR'
+    if re.search(r'\bER\d{4}', n):              return 'ROTEADOR' # ER7206, ER7212PC, ER8411
+    if 'AR280' in n or 'GATEWAY' in n:          return 'ROTEADOR'
+    # APs — EAP (TP-Link), RW (Intelbras), AP361 (Huawei), 3.005/3620 (Intelbras), DM-AP
+    if re.search(r'\bEAP\d', n):                return 'AP'       # EAP610, EAP613, EAP650
+    if 'DM-AP' in n or 'DM AP' in n:           return 'AP'
+    if re.search(r'RW\d{4}', n):               return 'AP'       # RW6181, RW6302
+    if 'AP361' in n or '3620' in n:             return 'AP'
+    if re.search(r'3\.005|3005', n):            return 'AP'       # INTELBRAS 3.005
+    if 'AP' in n or 'ACCESS' in n:              return 'AP'
     return n
 
 @st.cache_data(ttl=600)
