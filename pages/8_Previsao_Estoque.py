@@ -101,7 +101,8 @@ def load_saldo():
     if 'item' not in df.columns:
         return df
     df['funcao'] = df['item'].apply(_item_to_funcao)
-    return df.groupby(['parceiro','funcao'], as_index=False)['saldo_atual'].sum()
+    group_cols = ['parceiro','funcao'] + (['fase'] if 'fase' in df.columns else [])
+    return df.groupby(group_cols, as_index=False)['saldo_atual'].sum()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CÁLCULOS
@@ -147,27 +148,44 @@ def calc_previsao(df_circ, df_exec, df_topo, desvio):
     records = []
     for _, row in a_inst.iterrows():
         fase  = row['fase']
-        fab   = str(row.get('fabricante') or '').upper()
+        fab   = str(row.get('fabricante') or '').strip().upper()
         kit_n = int(row['kit_plan'])
         ad    = int(row['aps_plan'])
         parc  = row['parceiro']
+        uf    = str(row.get('uf') or '').strip().upper()
 
-        # Busca topologia: fase_norm × kit_num
-        mask = (df_topo['fase_norm'] == fase) & (df_topo['kit_num'] == kit_n)
-        sub  = df_topo[mask & df_topo['fabricante'].str.upper().eq(fab)] if fab else df_topo[mask]
-        if sub.empty: sub = df_topo[mask]
-        if sub.empty: continue
+        # Busca topologia: fase_norm × kit_num × UF × fabricante
+        mask_base = (df_topo['fase_norm'] == fase) & (df_topo['kit_num'] == kit_n)
+        # 1ª tentativa: fase + kit + UF + fabricante
+        sub = pd.DataFrame()
+        if uf and fab:
+            sub = df_topo[mask_base
+                          & df_topo['uf'].str.upper().str.strip().eq(uf)
+                          & df_topo['fabricante'].str.upper().eq(fab)]
+        # 2ª: fase + kit + UF
+        if sub.empty and uf:
+            sub = df_topo[mask_base & df_topo['uf'].str.upper().str.strip().eq(uf)]
+        # 3ª: fase + kit + fabricante
+        if sub.empty and fab:
+            sub = df_topo[mask_base & df_topo['fabricante'].str.upper().eq(fab)]
+        # fallback: apenas fase + kit (pega primeira UF disponível para evitar duplicar)
+        if sub.empty:
+            sub = df_topo[mask_base]
+            if not sub.empty:
+                primeira_uf = sub['uf'].iloc[0]
+                sub = sub[sub['uf'] == primeira_uf]
+        if sub.empty:
+            continue
 
         for _, tr in sub.iterrows():
             if tr['qtd'] == 0: continue
-            qtd = tr['qtd']
+            qtd = float(tr['qtd'])
             fc  = str(tr['funcao']).strip().upper()
-            if fc == 'AP'     and ad > 0: qtd += ad
+            if fc == 'AP'      and ad > 0: qtd += ad
             elif fc == 'INJETOR' and ad > 0: qtd += ad
-            elif fc == 'CABO' and ad > 0: qtd += ad * 30
+            elif fc == 'CABO'  and ad > 0: qtd += ad * 30
             records.append({'parceiro': parc, 'fase': fase,
-                            'item': tr['descricao'], 'funcao': fc,
-                            'qtd_base': qtd})
+                            'funcao': fc, 'qtd_base': qtd})
 
     if not records:
         return pd.DataFrame()
@@ -312,9 +330,16 @@ else:
 
     # Saldo por parceiro × funcao (vw_saldo.item mapeado para funcao)
     if not df_saldo.empty and 'funcao' in df_saldo.columns:
-        sal_agg = df_saldo[['parceiro','funcao','saldo_atual']]
+        # Se vw_saldo tiver coluna 'fase', filtra por ela também
+        if 'fase' in df_saldo.columns:
+            sal_agg = df_saldo.groupby(['parceiro','fase','funcao'], as_index=False)['saldo_atual'].sum()
+            merge_keys = ['parceiro','fase','funcao']
+        else:
+            sal_agg = df_saldo[['parceiro','funcao','saldo_atual']]
+            merge_keys = ['parceiro','funcao']
     else:
         sal_agg = pd.DataFrame(columns=['parceiro','funcao','saldo_atual'])
+        merge_keys = ['parceiro','funcao']
 
     prev_agg = df_pf.groupby(['parceiro','fase','funcao'], as_index=False).agg(
         qtd_prevista=('qtd_prevista','sum'),
@@ -323,7 +348,7 @@ else:
         sigma=('sigma','first'),
     )
 
-    farol = prev_agg.merge(sal_agg, on=['parceiro','funcao'], how='left')
+    farol = prev_agg.merge(sal_agg, on=merge_keys, how='left')
     farol['saldo_atual']  = farol['saldo_atual'].fillna(0)
     farol['saldo_liquido'] = farol['saldo_atual'] - farol['qtd_prevista']
 
