@@ -74,11 +74,28 @@ def load_exec():
 
 @st.cache_data(ttl=600)
 def load_saldo():
+    """Retorna saldo por parceiro (nome) × item (nome), com join nas tabelas de referência."""
     df = _load_all('vw_saldo')
+    if df.empty:
+        return df
     for c in ['total_recebido','total_baixado','total_recebido_transferencia',
               'total_enviado_transferencia','saldo_atual']:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+    # Resolve parceiro_id → nome
+    if 'parceiro_id' in df.columns and 'parceiro' not in df.columns:
+        parc = pd.DataFrame(_load_all('parceiros')[['id','nome']].values,
+                            columns=['parceiro_id','parceiro'])
+        parc['parceiro_id'] = pd.to_numeric(parc['parceiro_id'], errors='coerce')
+        df['parceiro_id'] = pd.to_numeric(df['parceiro_id'], errors='coerce')
+        df = df.merge(parc, on='parceiro_id', how='left')
+    # Resolve item_id → nome
+    if 'item_id' in df.columns and 'item' not in df.columns:
+        itens = pd.DataFrame(_load_all('itens')[['id','nome']].values,
+                             columns=['item_id','item'])
+        itens['item_id'] = pd.to_numeric(itens['item_id'], errors='coerce')
+        df['item_id'] = pd.to_numeric(df['item_id'], errors='coerce')
+        df = df.merge(itens, on='item_id', how='left')
     return df
 
 # ─────────────────────────────────────────────────────────────────────────────
