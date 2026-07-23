@@ -199,7 +199,7 @@ def calc_previsao(df_circ, df_exec, df_topo, desvio):
         if r['funcao'] in FUNCOES_VARIAVEIS else 1.0, axis=1)
     df_p['qtd_prevista'] = (df_p['qtd_base'] * df_p['fator']).round(0)
 
-    return df_p.groupby(['parceiro','fase','item','funcao'], as_index=False).agg(
+    return df_p.groupby(['parceiro','fase','funcao'], as_index=False).agg(
         qtd_prevista=('qtd_prevista','sum'),
         fator=('fator','mean'),
         bias=('bias','mean'),
