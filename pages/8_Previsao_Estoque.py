@@ -72,31 +72,36 @@ def load_exec():
         df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
     return df
 
+def _item_to_funcao(nome):
+    """Normaliza nome do item (vw_saldo) para funcao da topologia."""
+    n = str(nome).upper().strip()
+    if 'POE' in n or 'INJETOR' in n:   return 'INJETOR'
+    if 'CABO' in n:                     return 'CABO'
+    if 'NOBREAK' in n:                  return 'NOBREAK'
+    if 'RACK 5U' in n:                  return 'RACK 5U'
+    if 'RACK 8U' in n:                  return 'RACK 8U'
+    if 'RACK OUT' in n:                 return 'RACK OUTDOOR'
+    if 'BANDEJA' in n:                  return 'BANDEJA'
+    if 'ORGANIZ' in n:                  return 'ORGANIZADOR'
+    if 'SWITCH' in n:                   return 'SWITCH'
+    if 'VENTIL' in n:                   return 'VENTILADORES'
+    if 'SIMET' in n:                    return 'SIMET'
+    if 'CONTROLADORA' in n:             return 'CONTROLADORA'
+    if 'AP' in n or 'ACCESS' in n or 'ROTEADOR EMPRESARIAL' in n: return 'AP'
+    if 'ROTEADOR' in n or 'GATEWAY' in n: return 'ROTEADOR'
+    return n
+
 @st.cache_data(ttl=600)
 def load_saldo():
-    """Retorna saldo por parceiro (nome) × item (nome), com join nas tabelas de referência."""
+    """Retorna saldo agregado por parceiro × funcao."""
     df = _load_all('vw_saldo')
     if df.empty:
         return df
-    for c in ['total_recebido','total_baixado','total_recebido_transferencia',
-              'total_enviado_transferencia','saldo_atual']:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
-    # Resolve parceiro_id → nome
-    if 'parceiro_id' in df.columns and 'parceiro' not in df.columns:
-        parc = pd.DataFrame(_load_all('parceiros')[['id','nome']].values,
-                            columns=['parceiro_id','parceiro'])
-        parc['parceiro_id'] = pd.to_numeric(parc['parceiro_id'], errors='coerce')
-        df['parceiro_id'] = pd.to_numeric(df['parceiro_id'], errors='coerce')
-        df = df.merge(parc, on='parceiro_id', how='left')
-    # Resolve item_id → nome
-    if 'item_id' in df.columns and 'item' not in df.columns:
-        itens = pd.DataFrame(_load_all('itens')[['id','nome']].values,
-                             columns=['item_id','item'])
-        itens['item_id'] = pd.to_numeric(itens['item_id'], errors='coerce')
-        df['item_id'] = pd.to_numeric(df['item_id'], errors='coerce')
-        df = df.merge(itens, on='item_id', how='left')
-    return df
+    df['saldo_atual'] = pd.to_numeric(df.get('saldo_atual', 0), errors='coerce').fillna(0)
+    if 'item' not in df.columns:
+        return df
+    df['funcao'] = df['item'].apply(_item_to_funcao)
+    return df.groupby(['parceiro','funcao'], as_index=False)['saldo_atual'].sum()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CÁLCULOS
@@ -305,20 +310,20 @@ else:
     if sel_fases: df_pf = df_pf[df_pf['fase'].isin(sel_fases)]
     if sel_parc:  df_pf = df_pf[df_pf['parceiro'].isin(sel_parc)]
 
-    # Saldo por parceiro × item
-    if not df_saldo.empty and 'parceiro' in df_saldo.columns:
-        sal_agg = df_saldo.groupby(['parceiro','item'], as_index=False)['saldo_atual'].sum()
+    # Saldo por parceiro × funcao (vw_saldo.item mapeado para funcao)
+    if not df_saldo.empty and 'funcao' in df_saldo.columns:
+        sal_agg = df_saldo[['parceiro','funcao','saldo_atual']]
     else:
-        sal_agg = pd.DataFrame(columns=['parceiro','item','saldo_atual'])
+        sal_agg = pd.DataFrame(columns=['parceiro','funcao','saldo_atual'])
 
-    prev_agg = df_pf.groupby(['parceiro','item','funcao'], as_index=False).agg(
+    prev_agg = df_pf.groupby(['parceiro','fase','funcao'], as_index=False).agg(
         qtd_prevista=('qtd_prevista','sum'),
         fator=('fator','first'),
         bias=('bias','first'),
         sigma=('sigma','first'),
     )
 
-    farol = prev_agg.merge(sal_agg, on=['parceiro','item'], how='left')
+    farol = prev_agg.merge(sal_agg, on=['parceiro','funcao'], how='left')
     farol['saldo_atual']  = farol['saldo_atual'].fillna(0)
     farol['saldo_liquido'] = farol['saldo_atual'] - farol['qtd_prevista']
 
@@ -341,11 +346,11 @@ else:
     farol_show = farol[farol['Status'].isin(sel_status_farol)] if sel_status_farol else farol
 
     rename = {
-        'parceiro':'Parceiro','fase':'Fase','item':'Item','funcao':'Função',
+        'parceiro':'Parceiro','fase':'Fase','funcao':'Tipo de Item',
         'saldo_atual':'Saldo Atual','qtd_prevista':'Prev. Consumo',
         'saldo_liquido':'Saldo Líquido','fator':'Fator σ','Status':'Status'
     }
-    cols = [c for c in ['parceiro','fase','item','funcao','saldo_atual',
+    cols = [c for c in ['parceiro','fase','funcao','saldo_atual',
                         'qtd_prevista','saldo_liquido','fator','Status']
             if c in farol_show.columns]
 
@@ -377,10 +382,10 @@ else:
     if not faltas.empty:
         st.markdown("### 🔴 Top déficits")
         faltas['deficit'] = (-faltas['saldo_liquido']).round(0)
-        top = (faltas.groupby(['item','parceiro'],as_index=False)['deficit']
+        top = (faltas.groupby(['funcao','parceiro'],as_index=False)['deficit']
                .sum().sort_values('deficit',ascending=False).head(20))
-        fig_f = px.bar(top, x='deficit', y='item', color='parceiro', orientation='h',
-                       height=400, labels={'deficit':'Déficit (un)','item':'Item'},
+        fig_f = px.bar(top, x='deficit', y='funcao', color='parceiro', orientation='h',
+                       height=400, labels={'deficit':'Déficit (un)','funcao':'Tipo de Item'},
                        title='Top 20 — maior déficit de estoque',
                        color_discrete_sequence=px.colors.qualitative.Set2)
         fig_f.update_layout(margin=dict(t=40,b=0,l=0,r=0))
