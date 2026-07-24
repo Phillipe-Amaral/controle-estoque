@@ -100,7 +100,8 @@ def _item_to_funcao(nome):
     # Roteadores — ROUTER (inglês), ER series TP-Link, AR series Huawei, R3xxx Intelbras
     if 'ROUTER' in n or 'ROTEADOR' in n:        return 'ROTEADOR'
     if re.search(r'\bER\d{4}', n):              return 'ROTEADOR' # ER7206, ER7212PC, ER8411
-    if re.search(r'\bR3\d{3}', n):             return 'ROTEADOR' # R3006G-P, R3010G-P, R3006MG
+    if re.search(r'\bR3\d{3}', n):             return 'ROTEADOR' # R3006G-P, R3010G-P, R3006MG, R3005
+    if re.search(r'3\.005|3005', n):            return 'ROTEADOR' # INTELBRAS 3.005
     if 'AR280' in n or 'GATEWAY' in n:          return 'ROTEADOR'
     if re.search(r'GT\d{3}', n):               return 'ROTEADOR' # DM-AP GT110 (router Datacom)
     # APs — EAP (TP-Link), RW (Intelbras), modelos específicos, DM-AP
@@ -108,7 +109,6 @@ def _item_to_funcao(nome):
     if 'DM-AP' in n or 'DM AP' in n:           return 'AP'
     if re.search(r'RW\d{4}', n):               return 'AP'       # RW6181, RW6302
     if 'AP361' in n or '3620' in n:             return 'AP'
-    if re.search(r'3\.005|3005', n):            return 'AP'       # INTELBRAS 3.005
     if 'AP' in n or 'ACCESS' in n:              return 'AP'
     return n
 
