@@ -86,21 +86,24 @@ def _item_to_funcao(nome):
     if 'VENTIL' in n or 'PORCA' in n:           return 'VENTILADORES'
     if 'CONTROLADORA' in n:                     return 'CONTROLADORA'
     if 'SIMET' in n:                            return 'SIMET'
-    # Switches — verificar antes de AP (alguns nomes têm ambos)
+    # Switches (antes de AP/ROTEADOR para evitar falsos positivos)
     if 'SWITCH' in n:                           return 'SWITCH'
     if re.search(r'\bSG\d{4}', n):              return 'SWITCH'   # SG3428MP, SG2016P
     if re.search(r'\bES\d{3}', n):              return 'SWITCH'   # ES210GMP
-    if re.search(r'S2[23]\d{2}', n):            return 'SWITCH'   # S2328G, S220
+    if re.search(r'S2[23]\d{2}', n):            return 'SWITCH'   # S2328G-PA, S220-24T4X
     if re.search(r'\bS210\b', n):               return 'SWITCH'   # HUAWEI S210
-    # Injetores PoE (antes de AP pois POE160S tem "POE")
+    if re.search(r'DM\d{4}C', n):              return 'SWITCH'   # DATACOM DM1205C
+    # Injetores PoE
     if 'INJETOR' in n:                          return 'INJETOR'
-    if re.search(r'POE\d', n):                  return 'INJETOR'  # POE160S, etc.
-    if n in ('INTELBRAS POE',):                 return 'INJETOR'
-    # Roteadores (ROUTER = inglês, ER series TP-Link, AR series Huawei)
+    if re.search(r'POE\d', n):                  return 'INJETOR'  # POE160S
+    if 'INTELBRAS POE' == n:                    return 'INJETOR'
+    # Roteadores — ROUTER (inglês), ER series TP-Link, AR series Huawei, R3xxx Intelbras
     if 'ROUTER' in n or 'ROTEADOR' in n:        return 'ROTEADOR'
     if re.search(r'\bER\d{4}', n):              return 'ROTEADOR' # ER7206, ER7212PC, ER8411
+    if re.search(r'\bR3\d{3}', n):             return 'ROTEADOR' # R3006G-P, R3010G-P, R3006MG
     if 'AR280' in n or 'GATEWAY' in n:          return 'ROTEADOR'
-    # APs — EAP (TP-Link), RW (Intelbras), AP361 (Huawei), 3.005/3620 (Intelbras), DM-AP
+    if re.search(r'GT\d{3}', n):               return 'ROTEADOR' # DM-AP GT110 (router Datacom)
+    # APs — EAP (TP-Link), RW (Intelbras), modelos específicos, DM-AP
     if re.search(r'\bEAP\d', n):                return 'AP'       # EAP610, EAP613, EAP650
     if 'DM-AP' in n or 'DM AP' in n:           return 'AP'
     if re.search(r'RW\d{4}', n):               return 'AP'       # RW6181, RW6302
