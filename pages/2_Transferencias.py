@@ -30,10 +30,12 @@ def carregar_itens():
     r = sb.table("itens").select("id, nome, fabricante").order("nome").execute()
     return r.data
 
+FASES = ["4.1", "4.2", "4.2 ADICIONAL", "5.0", "SATÉLITE"]
+
 @st.cache_data(ttl=30)
 def carregar_transferencias():
     r = (sb.table("transferencias")
-         .select("id, parceiro_origem_id, parceiro_destino_id, item_id, qtd, fase, motivo, data_transferencia, status, data_aceite")
+         .select("id, parceiro_origem_id, parceiro_destino_id, item_id, qtd, fase, fase_origem, fase_destino, motivo, data_transferencia, status, data_aceite")
          .order("id", desc=True)
          .execute())
     rp = sb.table("parceiros").select("id, nome").execute()
@@ -41,21 +43,25 @@ def carregar_transferencias():
     parc_map = {p["id"]: p["nome"] for p in rp.data}
     item_map = {i["id"]: i["nome"] for i in ri.data}
 
-    colunas = ["ID","Origem","Destino","Item","Qtd","Fase","Motivo","Data","Status","Data Aceite"]
     rows = []
     for t in r.data:
+        # compatibilidade: usa fase_origem/destino se existir, senão cai em fase
+        fo = t.get("fase_origem") or t.get("fase") or ""
+        fd = t.get("fase_destino") or t.get("fase") or ""
         rows.append({
-            "ID":         t["id"],
-            "Origem":     parc_map.get(t["parceiro_origem_id"], ""),
-            "Destino":    parc_map.get(t["parceiro_destino_id"], ""),
-            "Item":       item_map.get(t["item_id"], ""),
-            "Qtd":        t["qtd"],
-            "Fase":       t["fase"] or "",
-            "Motivo":     t["motivo"] or "",
-            "Data":       t["data_transferencia"] or "",
-            "Status":     t["status"] or "",
-            "Data Aceite":t["data_aceite"] or "",
+            "ID":           t["id"],
+            "Origem":       parc_map.get(t["parceiro_origem_id"], ""),
+            "Fase Origem":  fo,
+            "Destino":      parc_map.get(t["parceiro_destino_id"], ""),
+            "Fase Destino": fd,
+            "Item":         item_map.get(t["item_id"], ""),
+            "Qtd":          t["qtd"],
+            "Motivo":       t["motivo"] or "",
+            "Data":         t["data_transferencia"] or "",
+            "Status":       t["status"] or "",
+            "Data Aceite":  t["data_aceite"] or "",
         })
+    colunas = ["ID","Origem","Fase Origem","Destino","Fase Destino","Item","Qtd","Motivo","Data","Status","Data Aceite"]
     return pd.DataFrame(rows, columns=colunas) if rows else pd.DataFrame(columns=colunas)
 
 # ── Título ────────────────────────────────────────────────────────────────────
@@ -76,24 +82,38 @@ with tab1:
     nomes_parceiros = list(parceiros.keys())
 
     with st.form("form_transf", clear_on_submit=True):
+        # ── Origem ────────────────────────────────────────────────────────────
+        st.markdown("**Origem**")
         col1, col2 = st.columns(2)
         with col1:
-            origem_sel  = st.selectbox("Parceiro de Origem *", nomes_parceiros)
-            item_sel    = st.selectbox("Item *", list(itens_dict.keys()))
-            fase        = st.selectbox("Fase", ["4.1", "4.2", "4.2 ADICIONAL", "5.0"])
+            origem_sel  = st.selectbox("Parceiro de Origem *", nomes_parceiros, key="orig_parc")
         with col2:
-            destinos = [p for p in nomes_parceiros if p != origem_sel]
-            destino_sel = st.selectbox("Parceiro de Destino *", nomes_parceiros)
-            qtd         = st.number_input("Quantidade *", min_value=1, value=1)
-            data_transf = st.date_input("Data da Transferência", value=date.today())
+            fase_origem = st.selectbox("Fase de Origem *", FASES, key="orig_fase")
+
+        st.markdown("**Destino**")
+        col3, col4 = st.columns(2)
+        with col3:
+            destino_sel = st.selectbox("Parceiro de Destino *", nomes_parceiros, key="dest_parc")
+        with col4:
+            fase_destino = st.selectbox("Fase de Destino *", FASES, key="dest_fase")
+
+        # ── Item / Qtd / Data ─────────────────────────────────────────────────
+        st.markdown("**Material**")
+        col5, col6, col7 = st.columns([3, 1, 1])
+        with col5:
+            item_sel = st.selectbox("Item *", list(itens_dict.keys()))
+        with col6:
+            qtd = st.number_input("Quantidade *", min_value=1, value=1)
+        with col7:
+            data_transf = st.date_input("Data", value=date.today())
 
         motivo = st.text_input("Motivo / Observação")
-
         submitted = st.form_submit_button("📤 Registrar Transferência", use_container_width=True, type="primary")
 
     if submitted:
-        if origem_sel == destino_sel:
-            st.error("Origem e destino não podem ser o mesmo parceiro.")
+        mesma_origem = (origem_sel == destino_sel and fase_origem == fase_destino)
+        if mesma_origem:
+            st.error("Origem e destino não podem ser o mesmo parceiro + fase.")
         else:
             try:
                 sb.table("transferencias").insert({
@@ -101,12 +121,17 @@ with tab1:
                     "parceiro_destino_id": parceiros[destino_sel],
                     "item_id":             itens_dict[item_sel],
                     "qtd":                 int(qtd),
-                    "fase":                fase,
+                    "fase":                fase_origem,   # mantém coluna legada
+                    "fase_origem":         fase_origem,
+                    "fase_destino":        fase_destino,
                     "motivo":              motivo or None,
                     "data_transferencia":  str(data_transf),
                     "status":              "pendente",
                 }).execute()
-                st.success(f"✅ Transferência registrada! Aguardando confirmação de **{destino_sel}**.")
+                destino_label = f"**{destino_sel}** (fase {fase_destino})"
+                if fase_origem != fase_destino:
+                    destino_label += f" — transferência entre fases ({fase_origem} → {fase_destino})"
+                st.success(f"✅ Transferência registrada! Aguardando confirmação de {destino_label}.")
                 st.cache_data.clear()
                 st.rerun()
             except Exception as e:
@@ -126,7 +151,7 @@ with tab2:
     else:
         st.warning(f"⏳ **{len(df_pend)} transferência(s) aguardando confirmação**")
         st.dataframe(
-            df_pend[["ID","Origem","Destino","Item","Qtd","Fase","Motivo","Data"]],
+            df_pend[["ID","Origem","Fase Origem","Destino","Fase Destino","Item","Qtd","Motivo","Data"]],
             use_container_width=True, hide_index=True
         )
 
@@ -167,23 +192,31 @@ with tab3:
 
     df_hist = carregar_transferencias()
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
-        parc_f = st.selectbox("Parceiro (origem ou destino)", ["Todos"] + sorted(
+        parc_f = st.selectbox("Parceiro", ["Todos"] + sorted(
             set(df_hist["Origem"].unique().tolist() + df_hist["Destino"].unique().tolist())
         ), key="h_parc")
     with col2:
-        fase_f = st.selectbox("Fase", ["Todas"] + sorted(df_hist["Fase"].dropna().unique().tolist()), key="h_fase")
+        fases_hist = sorted(set(
+            df_hist["Fase Origem"].dropna().unique().tolist() +
+            df_hist["Fase Destino"].dropna().unique().tolist()
+        ))
+        fase_f = st.selectbox("Fase (origem ou destino)", ["Todas"] + fases_hist, key="h_fase")
     with col3:
         status_f = st.selectbox("Status", ["Todos", "aceito", "pendente", "rejeitado"], key="h_status")
+    with col4:
+        cross_fase = st.checkbox("Somente entre fases diferentes", key="h_cross")
 
     df_view = df_hist.copy()
     if parc_f != "Todos":
         df_view = df_view[(df_view["Origem"] == parc_f) | (df_view["Destino"] == parc_f)]
     if fase_f != "Todas":
-        df_view = df_view[df_view["Fase"] == fase_f]
+        df_view = df_view[(df_view["Fase Origem"] == fase_f) | (df_view["Fase Destino"] == fase_f)]
     if status_f != "Todos":
         df_view = df_view[df_view["Status"] == status_f]
+    if cross_fase:
+        df_view = df_view[df_view["Fase Origem"] != df_view["Fase Destino"]]
 
     def colorir_status(val):
         if val == "aceito":     return "background-color:#d4edda; color:#155724"
