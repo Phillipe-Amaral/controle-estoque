@@ -286,6 +286,7 @@ with tab_resumo:
     )
 
     # ── Normaliza fase ────────────────────────────────────────────────────────
+    _FASE_4X_5 = {'4.3','4.4','4.5','4.6','4.7','4.8','4.9'}
     def _norm_fase(f):
         f = str(f).strip().upper()
         if '4.2' in f and ('ADICIONAL' in f or f.endswith('AD') or ' AD' in f):
@@ -293,6 +294,7 @@ with tab_resumo:
         if f.startswith('4.1'): return '4.1'
         if f.startswith('4.2'): return '4.2'
         if f.startswith('5'): return '5.0'
+        if any(x in f for x in _FASE_4X_5): return '5.0'
         return f
 
     df_res = df_all.copy()

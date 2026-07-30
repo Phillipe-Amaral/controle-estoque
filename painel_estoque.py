@@ -61,12 +61,14 @@ def carregar_consumo_cabo():
     df_exec['parceiro'] = df_exec['parceiro_id'].map(parc_map)
     df_exec['fase'] = df_exec['fase'].astype(str).str.strip()
 
+    _FASE_4X_5 = {'4.3','4.4','4.5','4.6','4.7','4.8','4.9'}
     def norm_fase(f):
         f = f.upper()
         if '4.2 ADICIONAL' in f or 'ADICIONAL' in f: return '4.2 Adicional'
         if '4.2' in f: return '4.2'
         if '4.1' in f: return '4.1'
         if '5.0' in f or '5' in f: return '5.0'
+        if any(x in f for x in _FASE_4X_5): return '5.0'
         return f
     df_exec['fase'] = df_exec['fase'].apply(norm_fase)
 
