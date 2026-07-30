@@ -313,6 +313,7 @@ for col, cor in [('Instaladas','#2ca02c'),('A Executar','#1f77b4'),
                              marker_color=cor, text=df_cons[col], textposition='auto'))
 fig_bar.update_layout(barmode='stack', height=320,
                       title='Distribuição de Escolas por Fase',
+                      xaxis_type='category',
                       legend=dict(orientation='h', y=-0.25),
                       margin=dict(t=40,b=0,l=0,r=0))
 st.plotly_chart(fig_bar, use_container_width=True)

@@ -221,7 +221,7 @@ with tab1:
     fig_fase = px.bar(df_fase_m, x='fase', y='Valor (R$)', color='Métrica', barmode='group',
                       color_discrete_map={'Receita_RI':'#2ca02c','Custo_RI':'#d62728','Margem':'#0C6679'},
                       height=380)
-    fig_fase.update_layout(margin=dict(l=0,r=0,t=20,b=0))
+    fig_fase.update_layout(margin=dict(l=0,r=0,t=20,b=0), xaxis_type='category')
     st.plotly_chart(fig_fase, use_container_width=True)
 
     st.markdown("---")
@@ -248,7 +248,8 @@ with tab1:
         fig_ap = px.bar(df_ap_g.melt('fase'), x='fase', y='value', color='variable',
                         barmode='group', labels={'value':'R$ por AP','variable':''},
                         color_discrete_map={'Receita Média/AP':'#2ca02c','Custo Médio/AP':'#d62728'},
-                        height=350)
+                        height=350, category_orders={'fase': sorted(df_ap_g['fase'].unique())})
+        fig_ap.update_layout(xaxis_type='category')
         st.plotly_chart(fig_ap, use_container_width=True)
     else:
         st.info("Nenhum registro com APs adicionais para os filtros selecionados.")
