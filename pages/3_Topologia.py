@@ -258,7 +258,7 @@ with tab3:
 
     col_m1, col_m2, col_m3 = st.columns(3)
     col_m1.metric("Total de Escolas", len(df_view))
-    col_m2.metric("Total de APs", int(df_view["APs"].sum()) if not df_view.empty else 0)
+    col_m2.metric("Total de APs", int(pd.to_numeric(df_view["APs"], errors='coerce').fillna(0).sum()) if not df_view.empty else 0)
     col_m3.metric("Parceiros distintos", df_view["Parceiro"].nunique() if not df_view.empty else 0)
 
     st.dataframe(df_view, use_container_width=True, hide_index=True, height=500)

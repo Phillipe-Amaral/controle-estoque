@@ -166,11 +166,19 @@ parceiros_lista = ["Todos"] + sorted(df_base["parceiro"].dropna().unique().tolis
 fases_lista     = ["Todas"] + sorted(df_base["fase"].dropna().unique().tolist())
 fabr_lista      = ["Todos"] + sorted(df_base["fabricante"].dropna().unique().tolist())
 itens_lista     = ["Todos"] + sorted(df_base["item"].dropna().unique().tolist())
+ufs_lista       = ["Todas"] + sorted(set(v for v in parc_uf.values() if v and v != "N/D"))
 
+uf_sel       = st.sidebar.selectbox("UF",         ufs_lista)
 parceiro_sel = st.sidebar.selectbox("Parceiro",   parceiros_lista)
 fase_sel     = st.sidebar.selectbox("Fase",       fases_lista)
 fabr_sel     = st.sidebar.selectbox("Fabricante", fabr_lista)
 item_sel     = st.sidebar.selectbox("Item",       itens_lista)
+
+# Parceiros pertencentes à UF selecionada (None = todas)
+_parceiros_na_uf = (
+    {p for p, u in parc_uf.items() if u == uf_sel}
+    if uf_sel != "Todas" else None
+)
 
 st.sidebar.markdown("---")
 mostrar_negativos = st.sidebar.checkbox("⚠️ Mostrar apenas saldo negativo", value=False)
@@ -178,6 +186,8 @@ st.sidebar.caption("Dados atualizados a cada 60 s")
 
 # ── Aplica filtros (tabela 1 — por fase) ──────────────────────────────────────
 df = df_base.copy()
+if _parceiros_na_uf is not None:
+    df = df[df["parceiro"].isin(_parceiros_na_uf)]
 if parceiro_sel != "Todos":
     df = df[df["parceiro"] == parceiro_sel]
 if fase_sel != "Todas":
@@ -273,6 +283,8 @@ st.markdown("### 🗂️ Visão Consolidada por Parceiro × Item (todas as fases
 st.caption("Saldo líquido independente de fase — útil quando o parceiro usou saldo de outra fase")
 
 df_cons2 = df_base.copy()
+if _parceiros_na_uf is not None:
+    df_cons2 = df_cons2[df_cons2["parceiro"].isin(_parceiros_na_uf)]
 if parceiro_sel != "Todos":
     df_cons2 = df_cons2[df_cons2["parceiro"] == parceiro_sel]
 if fabr_sel != "Todos":
@@ -350,6 +362,8 @@ st.markdown("### 🗺️ Visão Consolidada por Parceiro × UF (todas as fases s
 st.caption("Visão geográfica do saldo líquido por parceiro e estado")
 
 df_cons3 = df_base.copy()
+if _parceiros_na_uf is not None:
+    df_cons3 = df_cons3[df_cons3["parceiro"].isin(_parceiros_na_uf)]
 if parceiro_sel != "Todos":
     df_cons3 = df_cons3[df_cons3["parceiro"] == parceiro_sel]
 if fabr_sel != "Todos":
@@ -426,6 +440,8 @@ st.subheader("📡 Consumo de Cabo por AP — por Parceiro e Fase")
 
 df_cabo_ap  = carregar_consumo_cabo()
 df_cabo_fil = df_cabo_ap.copy()
+if _parceiros_na_uf is not None:
+    df_cabo_fil = df_cabo_fil[df_cabo_fil["parceiro"].isin(_parceiros_na_uf)]
 if parceiro_sel != "Todos":
     df_cabo_fil = df_cabo_fil[df_cabo_fil["parceiro"] == parceiro_sel]
 if fase_sel != "Todas":
@@ -504,6 +520,8 @@ if df_comp.empty:
 else:
     # Aplica filtro de parceiro e fase da sidebar (se selecionados)
     df_cmp_f = df_comp.copy()
+    if _parceiros_na_uf is not None:
+        df_cmp_f = df_cmp_f[df_cmp_f["parceiro"].isin(_parceiros_na_uf)]
     if parceiro_sel != "Todos":
         df_cmp_f = df_cmp_f[df_cmp_f["parceiro"] == parceiro_sel]
     if fase_sel != "Todas":
@@ -533,6 +551,10 @@ if df_transf.empty:
     st.info("Nenhuma transferência registrada.")
 else:
     df_trf_f = df_transf.copy()
+    if _parceiros_na_uf is not None:
+        df_trf_f = df_trf_f[
+            df_trf_f["origem"].isin(_parceiros_na_uf) | df_trf_f["destino"].isin(_parceiros_na_uf)
+        ]
     if parceiro_sel != "Todos":
         df_trf_f = df_trf_f[
             (df_trf_f["origem"] == parceiro_sel) | (df_trf_f["destino"] == parceiro_sel)
@@ -573,6 +595,8 @@ else:
 
     # Aplica filtros da sidebar ao saldo base
     df_sal_f = df_base.copy()
+    if _parceiros_na_uf is not None:
+        df_sal_f = df_sal_f[df_sal_f["parceiro"].isin(_parceiros_na_uf)]
     if parceiro_sel != "Todos":
         df_sal_f = df_sal_f[df_sal_f["parceiro"] == parceiro_sel]
     if fase_sel != "Todas":

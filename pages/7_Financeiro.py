@@ -305,12 +305,17 @@ with tab_resumo:
         .astype(float).fillna(0)
     )
 
-    FASE_UF_ORDER = [
-        ('4.1',    'MG'), ('4.1',    'ES'), ('4.1',    'RJ'), ('4.1',    'SP'),
-        ('4.2',    'MG'), ('4.2',    'ES'), ('4.2',    'RJ'), ('4.2',    'BA'), ('4.2',    'PA'), ('4.2',    'AM'),
-        ('4.2 AD.','AM'), ('4.2 AD.','BA'), ('4.2 AD.','CE'), ('4.2 AD.','MG'), ('4.2 AD.','PA'), ('4.2 AD.','SP'),
-        ('5.0',    'MG'), ('5.0',    'ES'), ('5.0',    'RJ'),
-    ]
+    # Gera dinamicamente a ordem de fases×UF a partir dos dados reais
+    FASE_ORDER = ['4.1', '4.2', '4.2 AD.', '5.0']
+    _available = df_res.groupby(['_fase', 'uf']).size().reset_index(name='n')
+    FASE_UF_ORDER = []
+    for _f in FASE_ORDER:
+        for _u in sorted(_available.loc[_available['_fase'] == _f, 'uf'].tolist()):
+            FASE_UF_ORDER.append((_f, _u))
+    # Fases extras não mapeadas acima
+    for _f in sorted(set(_available['_fase'].unique()) - set(FASE_ORDER)):
+        for _u in sorted(_available.loc[_available['_fase'] == _f, 'uf'].tolist()):
+            FASE_UF_ORDER.append((_f, _u))
 
     COL_LABELS = [f"{f}\n{u}" for f, u in FASE_UF_ORDER]
 
@@ -370,13 +375,24 @@ with tab_resumo:
 
         # 4.2 ADICIONAL é projeto só de RI — RE não existe nessa fase
         is_adicional = fase.startswith('4.2 AD')
+
+        # Escolas com RE: têm receita RE projetada, responsável ou custo RE orçado
+        # (exclui escolas de RI puro que não possuem contrato de RE)
+        _has_re = (
+            (g['rec_inst_re_prev'] > 0) |
+            (g['rec_mens_re_mensal'] > 0) |
+            g['responsavel_re'].notna() |
+            (g['custo_mensal_re_orc'] > 0)
+        )
+        g_re = g[_has_re]  # subconjunto de escolas com RE contratada
+
         if is_adicional:
             g_inst_re = g.iloc[0:0]  # empty
         elif _use_status_re:
-            _re_status = g['status_circuito_re'].fillna('').astype(str).str.strip().str.lower()
-            g_inst_re = g[_re_status.isin(STATUS_RE_INSTALADA)]
+            _re_status = g_re['status_circuito_re'].fillna('').astype(str).str.strip().str.lower()
+            g_inst_re = g_re[_re_status.isin(STATUS_RE_INSTALADA)]
         else:
-            g_inst_re = g[g['data_inst_re'].notna()]
+            g_inst_re = g_re[g_re['data_inst_re'].notna()]
 
         g_inst_ri   = g[g['data_inst_ri'].notna()]
         n_aprov_re  = int((g_inst_re['status_rdo'] == 'RDO Aprovada').sum()) if not g_inst_re.empty else 0
@@ -428,9 +444,18 @@ with tab_resumo:
             n = len(sub)
             return float(custo.sum() / n) if n > 0 else None
 
+        # Escolas com RI: têm receita de equipamento ou serviço RI, parceiro RI ou custo de serviço
+        _has_ri = (
+            g['parceiro_ri'].notna() |
+            (g['rec_equip_ri_prev'] > 0) |
+            (g['rec_serv_ri_prev'] > 0) |
+            (g['custo_serv_ri'] > 0)
+        )
+        n_ri_contratadas = int(_has_ri.sum())
+
         resumo_cols[col_label] = [
-            0 if is_adicional else len(g),  # RE's Contratadas
-            len(g_inst_re),                 # RE's Instaladas
+            0 if is_adicional else len(g_re),  # RE's Contratadas — apenas escolas com RE
+            len(g_inst_re),                    # RE's Instaladas
             n_aprov_re,       # RE's Aprovadas
             _qtd_tipo('Broker'),
             _qtd_tipo('Provedor'),
@@ -448,8 +473,8 @@ with tab_resumo:
             float(g_inst_re['rec_mens_re_24m'].sum())  if not g_inst_re.empty else 0.0,
             rec_mens_media,
             float((g_inst_re['rec_inst_re_prev'] + g_inst_re['rec_mens_re_24m']).sum()) if not g_inst_re.empty else 0.0,
-            len(g),           # RI's Contratadas
-            len(g_inst_ri),   # RI's Instaladas
+            n_ri_contratadas,  # RI's Contratadas — apenas escolas com RI
+            len(g_inst_ri),    # RI's Instaladas
             n_aprov_ri,       # RI's Aprovadas
             cst_inst_ri,
             float(g_inst_ri['custo_serv_ri'].mean()) if not g_inst_ri.empty else 0.0,

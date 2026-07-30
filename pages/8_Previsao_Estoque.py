@@ -19,6 +19,8 @@ STATUS_A_INSTALAR = {'Circuito com Contrato Fechado', 'Agendado',
                      'Implantação em andamento', 'Instalado com Pendência'}
 STATUS_SUSPENSO   = {'Em Reforma', 'Cancelado', 'Suspenso'}
 
+_FASE_MAP_5 = {'4.3','4.4','4.5','4.6','4.7','4.8','4.9'}
+
 def _norm_fase(f):
     f = str(f).strip().upper()
     if 'ADIC' in f: return '4.2 ADICIONAL'
@@ -26,6 +28,7 @@ def _norm_fase(f):
     if '4.2' in f: return '4.2'
     if '4.1' in f or 'FASE 1' in f: return '4.1'
     if 'SAT' in f: return 'SATÉLITE'
+    if any(x in f for x in _FASE_MAP_5): return '5.0'
     return f
 
 # ─────────────────────────────────────────────────────────────────────────────
