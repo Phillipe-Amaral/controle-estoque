@@ -443,7 +443,7 @@ else:
     # Resumo por parceiro
     st.markdown("### 📋 Resumo por Parceiro")
     rp = farol.groupby('parceiro').agg(
-        total=('item','count'),
+        total=('funcao','count'),
         falta=('Status', lambda x: (x=='🔴 Falta').sum()),
         ok=('Status',   lambda x: (x=='🟢 Adequado').sum()),
         sobra=('Status',lambda x: (x=='🟡 Sobra').sum()),
