@@ -32,27 +32,67 @@ def carregar_itens():
 
 FASES = ["4.1", "4.2", "4.2 ADICIONAL", "5.0", "SATÉLITE"]
 
+@st.cache_data(ttl=600)
+def carregar_ufs_disponiveis():
+    """Retorna lista de UFs presentes nas execuções."""
+    rows, offset = [], 0
+    while True:
+        r = sb.table("execucoes").select("uf").range(offset, offset + 999).execute()
+        rows.extend(r.data)
+        if len(r.data) < 1000: break
+        offset += 1000
+    ufs = sorted({(row.get("uf") or "").strip().upper() for row in rows if row.get("uf")})
+    return ufs
+
+@st.cache_data(ttl=30)
+def carregar_uf_parceiros():
+    """Retorna {parceiro_id: UF_principal} derivado das execuções reais."""
+    rp = sb.table("parceiros").select("id, uf").execute().data
+    id_to_uf = {p["id"]: (p.get("uf") or "") for p in rp}
+    exec_rows, offset = [], 0
+    while True:
+        r = sb.table("execucoes").select("uf, parceiro_id").range(offset, offset + 999).execute()
+        exec_rows.extend(r.data)
+        if len(r.data) < 1000: break
+        offset += 1000
+    # UF mais frequente por parceiro via execuções
+    from collections import Counter
+    freq: dict = {}
+    for row in exec_rows:
+        pid = row.get("parceiro_id")
+        uf  = (row.get("uf") or "").strip().upper()
+        if pid and uf:
+            freq.setdefault(pid, Counter())[uf] += 1
+    for pid, counter in freq.items():
+        id_to_uf[pid] = counter.most_common(1)[0][0]
+    return id_to_uf
+
 @st.cache_data(ttl=30)
 def carregar_transferencias():
+    # Usa select("*") para pegar uf_origem/uf_destino se já existirem na tabela
     r = (sb.table("transferencias")
-         .select("id, parceiro_origem_id, parceiro_destino_id, item_id, qtd, fase, fase_origem, fase_destino, motivo, data_transferencia, status, data_aceite")
+         .select("*")
          .order("id", desc=True)
          .execute())
     rp = sb.table("parceiros").select("id, nome").execute()
     ri = sb.table("itens").select("id, nome").execute()
     parc_map = {p["id"]: p["nome"] for p in rp.data}
     item_map = {i["id"]: i["nome"] for i in ri.data}
+    uf_map   = carregar_uf_parceiros()   # fallback para registros sem UF
 
     rows = []
     for t in r.data:
-        # compatibilidade: usa fase_origem/destino se existir, senão cai em fase
-        fo = t.get("fase_origem") or t.get("fase") or ""
-        fd = t.get("fase_destino") or t.get("fase") or ""
+        fo  = t.get("fase_origem") or t.get("fase") or ""
+        fd  = t.get("fase_destino") or t.get("fase") or ""
+        ufo = t.get("uf_origem") or uf_map.get(t.get("parceiro_origem_id"), "")
+        ufd = t.get("uf_destino") or uf_map.get(t.get("parceiro_destino_id"), "")
         rows.append({
             "ID":           t["id"],
             "Origem":       parc_map.get(t["parceiro_origem_id"], ""),
+            "UF Origem":    ufo,
             "Fase Origem":  fo,
             "Destino":      parc_map.get(t["parceiro_destino_id"], ""),
+            "UF Destino":   ufd,
             "Fase Destino": fd,
             "Item":         item_map.get(t["item_id"], ""),
             "Qtd":          t["qtd"],
@@ -61,7 +101,8 @@ def carregar_transferencias():
             "Status":       t["status"] or "",
             "Data Aceite":  t["data_aceite"] or "",
         })
-    colunas = ["ID","Origem","Fase Origem","Destino","Fase Destino","Item","Qtd","Motivo","Data","Status","Data Aceite"]
+    colunas = ["ID","Origem","UF Origem","Fase Origem","Destino","UF Destino","Fase Destino",
+               "Item","Qtd","Motivo","Data","Status","Data Aceite"]
     return pd.DataFrame(rows, columns=colunas) if rows else pd.DataFrame(columns=colunas)
 
 # ── Título ────────────────────────────────────────────────────────────────────
@@ -80,22 +121,27 @@ with tab1:
     itens_lista = carregar_itens()
     itens_dict = {f"{i['nome']} ({i['fabricante'] or 'sem fab.'})": i["id"] for i in itens_lista}
     nomes_parceiros = list(parceiros.keys())
+    ufs_disp = carregar_ufs_disponiveis()
 
     with st.form("form_transf", clear_on_submit=True):
         # ── Origem ────────────────────────────────────────────────────────────
         st.markdown("**Origem**")
-        col1, col2 = st.columns(2)
+        col1, col2, col_ufo = st.columns([3, 2, 1])
         with col1:
             origem_sel  = st.selectbox("Parceiro de Origem *", nomes_parceiros, key="orig_parc")
         with col2:
             fase_origem = st.selectbox("Fase de Origem *", FASES, key="orig_fase")
+        with col_ufo:
+            uf_origem   = st.selectbox("UF Origem", ufs_disp, key="orig_uf")
 
         st.markdown("**Destino**")
-        col3, col4 = st.columns(2)
+        col3, col4, col_ufd = st.columns([3, 2, 1])
         with col3:
             destino_sel = st.selectbox("Parceiro de Destino *", nomes_parceiros, key="dest_parc")
         with col4:
             fase_destino = st.selectbox("Fase de Destino *", FASES, key="dest_fase")
+        with col_ufd:
+            uf_destino  = st.selectbox("UF Destino", ufs_disp, key="dest_uf")
 
         # ── Item / Qtd / Data ─────────────────────────────────────────────────
         st.markdown("**Material**")
@@ -115,27 +161,41 @@ with tab1:
         if mesma_origem:
             st.error("Origem e destino não podem ser o mesmo parceiro + fase.")
         else:
+            payload = {
+                "parceiro_origem_id":  parceiros[origem_sel],
+                "parceiro_destino_id": parceiros[destino_sel],
+                "item_id":             itens_dict[item_sel],
+                "qtd":                 int(qtd),
+                "fase":                fase_origem,
+                "fase_origem":         fase_origem,
+                "fase_destino":        fase_destino,
+                "uf_origem":           uf_origem or None,
+                "uf_destino":          uf_destino or None,
+                "motivo":              motivo or None,
+                "data_transferencia":  str(data_transf),
+                "status":              "pendente",
+            }
             try:
-                sb.table("transferencias").insert({
-                    "parceiro_origem_id":  parceiros[origem_sel],
-                    "parceiro_destino_id": parceiros[destino_sel],
-                    "item_id":             itens_dict[item_sel],
-                    "qtd":                 int(qtd),
-                    "fase":                fase_origem,   # mantém coluna legada
-                    "fase_origem":         fase_origem,
-                    "fase_destino":        fase_destino,
-                    "motivo":              motivo or None,
-                    "data_transferencia":  str(data_transf),
-                    "status":              "pendente",
-                }).execute()
-                destino_label = f"**{destino_sel}** (fase {fase_destino})"
-                if fase_origem != fase_destino:
-                    destino_label += f" — transferência entre fases ({fase_origem} → {fase_destino})"
-                st.success(f"✅ Transferência registrada! Aguardando confirmação de {destino_label}.")
-                st.cache_data.clear()
-                st.rerun()
+                sb.table("transferencias").insert(payload).execute()
             except Exception as e:
-                st.error(f"Erro ao registrar: {e}")
+                if "uf_origem" in str(e) or "uf_destino" in str(e):
+                    # Colunas ainda não existem no banco — insere sem elas
+                    payload.pop("uf_origem", None)
+                    payload.pop("uf_destino", None)
+                    try:
+                        sb.table("transferencias").insert(payload).execute()
+                    except Exception as e2:
+                        st.error(f"Erro ao registrar: {e2}")
+                        st.stop()
+                else:
+                    st.error(f"Erro ao registrar: {e}")
+                    st.stop()
+            destino_label = f"**{destino_sel}** (fase {fase_destino})"
+            if fase_origem != fase_destino:
+                destino_label += f" — transferência entre fases ({fase_origem} → {fase_destino})"
+            st.success(f"✅ Transferência registrada! Aguardando confirmação de {destino_label}.")
+            st.cache_data.clear()
+            st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ABA 2 — CONFIRMAR RECEBIMENTO
@@ -151,7 +211,7 @@ with tab2:
     else:
         st.warning(f"⏳ **{len(df_pend)} transferência(s) aguardando confirmação**")
         st.dataframe(
-            df_pend[["ID","Origem","Fase Origem","Destino","Fase Destino","Item","Qtd","Motivo","Data"]],
+            df_pend[["ID","Origem","UF Origem","Fase Origem","Destino","UF Destino","Fase Destino","Item","Qtd","Motivo","Data"]],
             use_container_width=True, hide_index=True
         )
 
@@ -192,7 +252,7 @@ with tab3:
 
     df_hist = carregar_transferencias()
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         parc_f = st.selectbox("Parceiro", ["Todos"] + sorted(
             set(df_hist["Origem"].unique().tolist() + df_hist["Destino"].unique().tolist())
@@ -204,8 +264,14 @@ with tab3:
         ))
         fase_f = st.selectbox("Fase (origem ou destino)", ["Todas"] + fases_hist, key="h_fase")
     with col3:
-        status_f = st.selectbox("Status", ["Todos", "aceito", "pendente", "rejeitado"], key="h_status")
+        all_ufs_hist = sorted(set(
+            df_hist["UF Origem"].dropna().unique().tolist() +
+            df_hist["UF Destino"].dropna().unique().tolist()
+        ))
+        uf_f = st.selectbox("UF (origem ou destino)", ["Todas"] + all_ufs_hist, key="h_uf")
     with col4:
+        status_f = st.selectbox("Status", ["Todos", "aceito", "pendente", "rejeitado"], key="h_status")
+    with col5:
         cross_fase = st.checkbox("Somente entre fases diferentes", key="h_cross")
 
     df_view = df_hist.copy()
@@ -213,6 +279,8 @@ with tab3:
         df_view = df_view[(df_view["Origem"] == parc_f) | (df_view["Destino"] == parc_f)]
     if fase_f != "Todas":
         df_view = df_view[(df_view["Fase Origem"] == fase_f) | (df_view["Fase Destino"] == fase_f)]
+    if uf_f != "Todas":
+        df_view = df_view[(df_view["UF Origem"] == uf_f) | (df_view["UF Destino"] == uf_f)]
     if status_f != "Todos":
         df_view = df_view[df_view["Status"] == status_f]
     if cross_fase:

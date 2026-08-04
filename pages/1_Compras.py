@@ -31,6 +31,16 @@ def carregar_itens():
     r = sb.table("itens").select("id, nome, fabricante").order("nome").execute()
     return r.data
 
+@st.cache_data(ttl=600)
+def carregar_ufs_disponiveis():
+    rows, offset = [], 0
+    while True:
+        r = sb.table("execucoes").select("uf").range(offset, offset + 999).execute()
+        rows.extend(r.data)
+        if len(r.data) < 1000: break
+        offset += 1000
+    return sorted({(row.get("uf") or "").strip().upper() for row in rows if row.get("uf")})
+
 @st.cache_data(ttl=30)
 def carregar_uf_parceiros():
     """Retorna dict {parceiro_id: set_of_ufs} a partir das execuções reais."""
@@ -76,7 +86,7 @@ def carregar_compras():
         rows.append({
             "ID":          c["id"],
             "Parceiro":    parc_map.get(c["parceiro_id"], ""),
-            "UF(s)":       uf_map.get(c["parceiro_id"], ""),
+            "UF":          c.get("uf") or uf_map.get(c["parceiro_id"], ""),
             "Item":        item_map.get(c["item_id"], ""),
             "Fornecedor":  c["fornecedor"] or "",
             "Qtd Pedida":  c["qtd_pedida"],
@@ -88,7 +98,7 @@ def carregar_compras():
             "Data Pedido": c["data_pedido"] or "",
             "Data Receb.": c["data_recebimento"] or "",
         })
-    colunas = ["ID","Parceiro","UF(s)","Item","Fornecedor","Qtd Pedida","Qtd Recebida",
+    colunas = ["ID","Parceiro","UF","Item","Fornecedor","Qtd Pedida","Qtd Recebida",
                "Valor Unit.","Nº Pedido","NF","Fase","Data Pedido","Data Receb."]
     return pd.DataFrame(rows, columns=colunas) if rows else pd.DataFrame(columns=colunas)
 
@@ -106,6 +116,7 @@ with tab1:
     parceiros = carregar_parceiros()
     itens_lista = carregar_itens()
     itens_dict = {f"{i['nome']} ({i['fabricante'] or 'sem fab.'})": i["id"] for i in itens_lista}
+    ufs_disp = carregar_ufs_disponiveis()
 
     with st.form("form_compra", clear_on_submit=True):
         col1, col2 = st.columns(2)
@@ -113,7 +124,11 @@ with tab1:
             parceiro_sel = st.selectbox("Parceiro *", list(parceiros.keys()))
             item_sel     = st.selectbox("Item *", list(itens_dict.keys()))
             fornecedor   = st.text_input("Fornecedor")
-            fase         = st.selectbox("Fase", ["4.1", "4.2", "4.2 ADICIONAL", "5.0"])
+            colfa, coluf = st.columns([2, 1])
+            with colfa:
+                fase     = st.selectbox("Fase", ["4.1", "4.2", "4.2 ADICIONAL", "5.0"])
+            with coluf:
+                uf_compra = st.selectbox("UF", ufs_disp)
         with col2:
             qtd_pedida   = st.number_input("Qtd Pedida *", min_value=1, value=1)
             valor_unit   = st.number_input("Valor Unitário (R$)", min_value=0.0, value=0.0, format="%.2f")
@@ -125,24 +140,35 @@ with tab1:
         submitted = st.form_submit_button("💾 Salvar Compra", use_container_width=True, type="primary")
 
     if submitted:
+        payload = {
+            "parceiro_id":    parceiros[parceiro_sel],
+            "item_id":        itens_dict[item_sel],
+            "fornecedor":     fornecedor or None,
+            "qtd_pedida":     int(qtd_pedida),
+            "qtd_recebida":   0,
+            "valor_unitario": float(valor_unit) if valor_unit > 0 else None,
+            "numero_pedido":  num_pedido or None,
+            "nf":             nf or None,
+            "fase":           fase,
+            "uf":             uf_compra or None,
+            "data_pedido":    str(data_pedido),
+        }
         try:
-            sb.table("compras").insert({
-                "parceiro_id":    parceiros[parceiro_sel],
-                "item_id":        itens_dict[item_sel],
-                "fornecedor":     fornecedor or None,
-                "qtd_pedida":     int(qtd_pedida),
-                "qtd_recebida":   0,
-                "valor_unitario": float(valor_unit) if valor_unit > 0 else None,
-                "numero_pedido":  num_pedido or None,
-                "nf":             nf or None,
-                "fase":           fase,
-                "data_pedido":    str(data_pedido),
-            }).execute()
-            st.success(f"✅ Compra registrada com sucesso!")
-            st.cache_data.clear()
-            st.rerun()
+            sb.table("compras").insert(payload).execute()
         except Exception as e:
-            st.error(f"Erro ao salvar: {e}")
+            if "uf" in str(e) and "column" in str(e).lower():
+                payload.pop("uf", None)
+                try:
+                    sb.table("compras").insert(payload).execute()
+                except Exception as e2:
+                    st.error(f"Erro ao salvar: {e2}")
+                    st.stop()
+            else:
+                st.error(f"Erro ao salvar: {e}")
+                st.stop()
+        st.success("✅ Compra registrada com sucesso!")
+        st.cache_data.clear()
+        st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ABA 2 — CONFIRMAR RECEBIMENTO
@@ -159,7 +185,7 @@ with tab2:
         st.info("✅ Nenhum pedido pendente de recebimento!")
     else:
         st.caption(f"{len(df_pendentes)} pedido(s) aguardando recebimento")
-        st.dataframe(df_pendentes[["ID","Parceiro","UF(s)","Item","Fornecedor","Qtd Pedida","Qtd Recebida","NF","Data Pedido"]],
+        st.dataframe(df_pendentes[["ID","Parceiro","UF","Item","Fornecedor","Qtd Pedida","Qtd Recebida","NF","Data Pedido"]],
                      use_container_width=True, hide_index=True)
 
         st.markdown("---")
@@ -204,13 +230,7 @@ with tab3:
     with col2:
         fase_filtro = st.selectbox("Filtrar por Fase", ["Todas"] + sorted(df_compras2["Fase"].unique().tolist()), key="hist_fase")
     with col3:
-        # UFs disponíveis: extraídas da coluna UF(s) (pode ter "ES, MG")
-        all_ufs = sorted(set(
-            uf.strip()
-            for ufs_str in df_compras2["UF(s)"].dropna()
-            for uf in ufs_str.split(",")
-            if uf.strip()
-        ))
+        all_ufs = sorted(df_compras2["UF"].dropna().unique().tolist())
         uf_filtro = st.selectbox("Filtrar por UF", ["Todas"] + all_ufs, key="hist_uf")
 
     df_hist = df_compras2.copy()
@@ -219,10 +239,9 @@ with tab3:
     if fase_filtro != "Todas":
         df_hist = df_hist[df_hist["Fase"] == fase_filtro]
     if uf_filtro != "Todas":
-        df_hist = df_hist[df_hist["UF(s)"].str.contains(uf_filtro, na=False)]
+        df_hist = df_hist[df_hist["UF"] == uf_filtro]
 
     st.dataframe(df_hist, use_container_width=True, hide_index=True, height=500)
-    st.caption("A coluna **UF(s)** lista os estados onde o parceiro realizou instalações (execuções registradas).")
 
     st.download_button(
         "⬇️ Exportar (.csv)",
