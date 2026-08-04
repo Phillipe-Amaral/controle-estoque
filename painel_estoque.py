@@ -37,6 +37,29 @@ def carregar_parceiros_uf():
     return {p["nome"]: (p.get("uf") or "N/D") for p in r.data}
 
 @st.cache_data(ttl=60)
+def carregar_uf_por_execucao():
+    """Retorna dict {uf: set(parceiro_nome)} com base nas execuções reais."""
+    sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+    # Carrega execucoes com uf e parceiro_id
+    rows, offset = [], 0
+    while True:
+        r = sb.table("execucoes").select("uf, parceiro_id").range(offset, offset + 999).execute()
+        rows.extend(r.data)
+        if len(r.data) < 1000: break
+        offset += 1000
+    # Mapa id → nome
+    parc_r = sb.table("parceiros").select("id, nome").execute().data
+    id_to_nome = {p["id"]: p["nome"] for p in parc_r}
+    # Agrega uf → set de parceiros
+    uf_to_parcs: dict = {}
+    for row in rows:
+        uf = (row.get("uf") or "").strip().upper()
+        nome = id_to_nome.get(row.get("parceiro_id"), "")
+        if uf and nome:
+            uf_to_parcs.setdefault(uf, set()).add(nome)
+    return uf_to_parcs
+
+@st.cache_data(ttl=60)
 def carregar_consumo_cabo():
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -155,7 +178,8 @@ def carregar_financeiro_estoque():
     return df_c, df_t, unit_cost
 
 df_base = carregar_saldo()
-parc_uf = carregar_parceiros_uf()
+parc_uf      = carregar_parceiros_uf()
+uf_execucoes = carregar_uf_por_execucao()   # {uf: set(parceiro_nome)} das execuções reais
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 st.sidebar.image(
@@ -168,7 +192,8 @@ parceiros_lista = ["Todos"] + sorted(df_base["parceiro"].dropna().unique().tolis
 fases_lista     = ["Todas"] + sorted(df_base["fase"].dropna().unique().tolist())
 fabr_lista      = ["Todos"] + sorted(df_base["fabricante"].dropna().unique().tolist())
 itens_lista     = ["Todos"] + sorted(df_base["item"].dropna().unique().tolist())
-ufs_lista       = ["Todas"] + sorted(set(v for v in parc_uf.values() if v and v != "N/D"))
+# UFs = todos os estados com execuções reais (cobre MG, SP, BA etc.)
+ufs_lista       = ["Todas"] + sorted(uf_execucoes.keys())
 
 uf_sel       = st.sidebar.selectbox("UF",         ufs_lista)
 parceiro_sel = st.sidebar.selectbox("Parceiro",   parceiros_lista)
@@ -176,11 +201,8 @@ fase_sel     = st.sidebar.selectbox("Fase",       fases_lista)
 fabr_sel     = st.sidebar.selectbox("Fabricante", fabr_lista)
 item_sel     = st.sidebar.selectbox("Item",       itens_lista)
 
-# Parceiros pertencentes à UF selecionada (None = todas)
-_parceiros_na_uf = (
-    {p for p, u in parc_uf.items() if u == uf_sel}
-    if uf_sel != "Todas" else None
-)
+# Parceiros com execuções na UF selecionada (None = todas)
+_parceiros_na_uf = uf_execucoes.get(uf_sel) if uf_sel != "Todas" else None
 
 st.sidebar.markdown("---")
 mostrar_negativos = st.sidebar.checkbox("⚠️ Mostrar apenas saldo negativo", value=False)
