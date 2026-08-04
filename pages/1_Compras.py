@@ -32,6 +32,34 @@ def carregar_itens():
     return r.data
 
 @st.cache_data(ttl=30)
+def carregar_uf_parceiros():
+    """Retorna dict {parceiro_id: set_of_ufs} a partir das execuções reais."""
+    rp = sb.table("parceiros").select("id, nome, uf").execute().data
+    id_to_nome = {p["id"]: p["nome"] for p in rp}
+    # UF cadastral como fallback
+    id_to_uf_cadastro = {p["id"]: (p.get("uf") or "") for p in rp}
+
+    exec_rows, offset = [], 0
+    while True:
+        r = sb.table("execucoes").select("uf, parceiro_id").range(offset, offset + 999).execute()
+        exec_rows.extend(r.data)
+        if len(r.data) < 1000: break
+        offset += 1000
+
+    id_to_ufs: dict = {}
+    for row in exec_rows:
+        pid = row.get("parceiro_id")
+        uf  = (row.get("uf") or "").strip().upper()
+        if pid and uf:
+            id_to_ufs.setdefault(pid, set()).add(uf)
+    # Para IDs sem execuções, usa UF cadastral
+    for pid, uf in id_to_uf_cadastro.items():
+        if pid not in id_to_ufs and uf:
+            id_to_ufs[pid] = {uf}
+    # Retorna string ordenada (ex: "ES, MG, RJ")
+    return {pid: ", ".join(sorted(ufs)) for pid, ufs in id_to_ufs.items()}
+
+@st.cache_data(ttl=30)
 def carregar_compras():
     r = (sb.table("compras")
          .select("id, parceiro_id, item_id, fornecedor, qtd_pedida, qtd_recebida, valor_unitario, numero_pedido, nf, fase, data_pedido, data_recebimento")
@@ -41,12 +69,14 @@ def carregar_compras():
     ri = sb.table("itens").select("id, nome").execute()
     parc_map = {p["id"]: p["nome"] for p in rp.data}
     item_map = {i["id"]: i["nome"] for i in ri.data}
+    uf_map   = carregar_uf_parceiros()
 
     rows = []
     for c in r.data:
         rows.append({
             "ID":          c["id"],
             "Parceiro":    parc_map.get(c["parceiro_id"], ""),
+            "UF(s)":       uf_map.get(c["parceiro_id"], ""),
             "Item":        item_map.get(c["item_id"], ""),
             "Fornecedor":  c["fornecedor"] or "",
             "Qtd Pedida":  c["qtd_pedida"],
@@ -58,7 +88,7 @@ def carregar_compras():
             "Data Pedido": c["data_pedido"] or "",
             "Data Receb.": c["data_recebimento"] or "",
         })
-    colunas = ["ID","Parceiro","Item","Fornecedor","Qtd Pedida","Qtd Recebida",
+    colunas = ["ID","Parceiro","UF(s)","Item","Fornecedor","Qtd Pedida","Qtd Recebida",
                "Valor Unit.","Nº Pedido","NF","Fase","Data Pedido","Data Receb."]
     return pd.DataFrame(rows, columns=colunas) if rows else pd.DataFrame(columns=colunas)
 
@@ -129,7 +159,7 @@ with tab2:
         st.info("✅ Nenhum pedido pendente de recebimento!")
     else:
         st.caption(f"{len(df_pendentes)} pedido(s) aguardando recebimento")
-        st.dataframe(df_pendentes[["ID","Parceiro","Item","Fornecedor","Qtd Pedida","Qtd Recebida","NF","Data Pedido"]],
+        st.dataframe(df_pendentes[["ID","Parceiro","UF(s)","Item","Fornecedor","Qtd Pedida","Qtd Recebida","NF","Data Pedido"]],
                      use_container_width=True, hide_index=True)
 
         st.markdown("---")
@@ -168,19 +198,31 @@ with tab3:
 
     df_compras2 = carregar_compras()
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         parc_filtro = st.selectbox("Filtrar por Parceiro", ["Todos"] + sorted(df_compras2["Parceiro"].unique().tolist()), key="hist_parc")
     with col2:
         fase_filtro = st.selectbox("Filtrar por Fase", ["Todas"] + sorted(df_compras2["Fase"].unique().tolist()), key="hist_fase")
+    with col3:
+        # UFs disponíveis: extraídas da coluna UF(s) (pode ter "ES, MG")
+        all_ufs = sorted(set(
+            uf.strip()
+            for ufs_str in df_compras2["UF(s)"].dropna()
+            for uf in ufs_str.split(",")
+            if uf.strip()
+        ))
+        uf_filtro = st.selectbox("Filtrar por UF", ["Todas"] + all_ufs, key="hist_uf")
 
     df_hist = df_compras2.copy()
     if parc_filtro != "Todos":
         df_hist = df_hist[df_hist["Parceiro"] == parc_filtro]
     if fase_filtro != "Todas":
         df_hist = df_hist[df_hist["Fase"] == fase_filtro]
+    if uf_filtro != "Todas":
+        df_hist = df_hist[df_hist["UF(s)"].str.contains(uf_filtro, na=False)]
 
     st.dataframe(df_hist, use_container_width=True, hide_index=True, height=500)
+    st.caption("A coluna **UF(s)** lista os estados onde o parceiro realizou instalações (execuções registradas).")
 
     st.download_button(
         "⬇️ Exportar (.csv)",

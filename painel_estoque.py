@@ -60,6 +60,61 @@ def carregar_uf_por_execucao():
     return uf_to_parcs
 
 @st.cache_data(ttl=60)
+def carregar_baixas_por_uf(uf: str):
+    """Retorna baixas (execucao_itens) especificamente realizadas na UF informada."""
+    sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+    parc_r = sb.table("parceiros").select("id, nome").execute().data
+    id_to_nome = {p["id"]: p["nome"] for p in parc_r}
+    item_r = sb.table("itens").select("id, nome").execute().data
+    id_to_item = {i["id"]: i["nome"] for i in item_r}
+
+    # Execuções nessa UF
+    exec_rows, offset = [], 0
+    while True:
+        r = (sb.table("execucoes")
+             .select("id, parceiro_id, fase")
+             .eq("uf", uf)
+             .range(offset, offset + 999).execute())
+        exec_rows.extend(r.data)
+        if len(r.data) < 1000: break
+        offset += 1000
+
+    if not exec_rows:
+        return pd.DataFrame(columns=["Parceiro","Fase","Item","Qtd Baixada"])
+
+    exec_ids  = [r["id"] for r in exec_rows]
+    exec_meta = {r["id"]: {"parceiro": id_to_nome.get(r["parceiro_id"],""),
+                           "fase": r.get("fase","") or ""} for r in exec_rows}
+
+    # Itens consumidos
+    ei_rows, offset = [], 0
+    while True:
+        r = (sb.table("execucao_itens")
+             .select("execucao_id, item_id, qtd")
+             .in_("execucao_id", exec_ids[offset:offset+500])
+             .execute())
+        ei_rows.extend(r.data)
+        if len(r.data) < 500: break
+        offset += 500
+
+    if not ei_rows:
+        return pd.DataFrame(columns=["Parceiro","Fase","Item","Qtd Baixada"])
+
+    rows = []
+    for ei in ei_rows:
+        meta = exec_meta.get(ei["execucao_id"], {})
+        rows.append({
+            "Parceiro": meta.get("parceiro",""),
+            "Fase":     meta.get("fase",""),
+            "Item":     id_to_item.get(ei["item_id"],""),
+            "Qtd Baixada": float(ei.get("qtd") or 0),
+        })
+    df = pd.DataFrame(rows)
+    df["Qtd Baixada"] = pd.to_numeric(df["Qtd Baixada"], errors="coerce").fillna(0)
+    return (df.groupby(["Parceiro","Fase","Item"], as_index=False)["Qtd Baixada"]
+              .sum().sort_values(["Parceiro","Fase","Item"]))
+
+@st.cache_data(ttl=60)
 def carregar_consumo_cabo():
     sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -275,6 +330,41 @@ st.download_button(
     file_name="saldo_por_fase.csv",
     mime="text/csv",
 )
+
+# ─── Seção exclusiva quando UF está selecionada ────────────────────────────────
+if uf_sel != "Todas":
+    st.markdown(f"---\n### 📍 Baixas realizadas em **{uf_sel}** (instalações nesse estado)")
+    st.caption(
+        f"Itens consumidos em escolas do estado {uf_sel}, calculados diretamente das execuções. "
+        "Recebido e Saldo na tabela acima refletem o estoque total do parceiro (compras não têm UF no registro)."
+    )
+    with st.spinner(f"Carregando baixas em {uf_sel}..."):
+        df_baixas_uf = carregar_baixas_por_uf(uf_sel)
+
+    if df_baixas_uf.empty:
+        st.info(f"Nenhuma baixa registrada para o estado {uf_sel}.")
+    else:
+        # Aplicar filtros de parceiro/fase/item da sidebar
+        df_b = df_baixas_uf.copy()
+        if parceiro_sel != "Todos":
+            df_b = df_b[df_b["Parceiro"] == parceiro_sel]
+        if fase_sel != "Todas":
+            df_b = df_b[df_b["Fase"] == fase_sel]
+        if item_sel != "Todos":
+            df_b = df_b[df_b["Item"] == item_sel]
+
+        col_bk1, col_bk2, col_bk3 = st.columns(3)
+        col_bk1.metric("Parceiros em " + uf_sel, df_b["Parceiro"].nunique())
+        col_bk2.metric("Itens distintos",          df_b["Item"].nunique())
+        col_bk3.metric("Total Unidades Baixadas",   f"{int(df_b['Qtd Baixada'].sum()):,}".replace(",","."))
+
+        st.dataframe(df_b, use_container_width=True, hide_index=True, height=400)
+        st.download_button(
+            f"⬇️ Exportar baixas {uf_sel} (.csv)",
+            data=df_b.to_csv(index=False).encode("utf-8"),
+            file_name=f"baixas_{uf_sel}.csv",
+            mime="text/csv",
+        )
 
 col_graf1, col_graf2 = st.columns(2)
 with col_graf1:
