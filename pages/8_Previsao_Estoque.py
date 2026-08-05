@@ -81,8 +81,7 @@ def _item_to_funcao(nome):
     # Fixos estruturais
     if 'NOBREAK' in n:                          return 'NOBREAK'
     if 'RACK OUT' in n:                         return 'RACK OUTDOOR'
-    if 'RACK 5U' in n:                          return 'RACK 5U'
-    if 'RACK 8U' in n:                          return 'RACK 8U'
+    if 'RACK 5U' in n or 'RACK 8U' in n:       return 'RACK'
     if 'BANDEJA' in n:                          return 'BANDEJA'
     if 'ORGANIZ' in n:                          return 'ORGANIZADOR'
     if 'CABO' in n:                             return 'CABO'
@@ -149,6 +148,12 @@ def calc_desvio(df_circ):
         }
     return result
 
+# Mapeia funcao da topologia para funcao canônica (consolida similares no planejamento)
+FUNCAO_CANONICAL = {
+    'RACK 5U': 'RACK',
+    'RACK 8U': 'RACK',
+}
+
 FUNCOES_VARIAVEIS = {'AP', 'AP OUTDOOR', 'INJETOR', 'CABO'}
 
 def calc_previsao(df_circ, df_exec, df_topo, desvio):
@@ -205,9 +210,10 @@ def calc_previsao(df_circ, df_exec, df_topo, desvio):
             if tr['qtd'] == 0: continue
             qtd = float(tr['qtd'])
             fc  = str(tr['funcao']).strip().upper()
-            if fc == 'AP'      and ad > 0: qtd += ad
+            fc  = FUNCAO_CANONICAL.get(fc, fc)  # consolida similares
+            if fc == 'AP'        and ad > 0: qtd += ad
             elif fc == 'INJETOR' and ad > 0: qtd += ad
-            elif fc == 'CABO'  and ad > 0: qtd += ad * 30
+            elif fc == 'CABO'    and ad > 0: qtd += ad * 30
             records.append({'parceiro': parc, 'fase': fase,
                             'funcao': fc, 'qtd_base': qtd})
 
