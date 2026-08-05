@@ -72,7 +72,7 @@ def carregar_uf_parceiros():
 @st.cache_data(ttl=30)
 def carregar_compras():
     r = (sb.table("compras")
-         .select("id, parceiro_id, item_id, fornecedor, qtd_pedida, qtd_recebida, valor_unitario, numero_pedido, nf, fase, data_pedido, data_recebimento")
+         .select("id, parceiro_id, item_id, fornecedor, qtd_pedida, qtd_recebida, valor_unitario, numero_pedido, nf, fase, uf, data_pedido, data_recebimento")
          .order("id", desc=True)
          .execute())
     rp = sb.table("parceiros").select("id, nome").execute()
