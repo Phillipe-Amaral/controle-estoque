@@ -691,6 +691,10 @@ with tab4:
     existing = {k:v for k,v in col_display.items() if k in df_f.columns}
     df_show = df_f[list(existing.keys())].rename(columns=existing).copy()
 
+    # Garantir que colunas object não tenham None (Arrow não serializa mixed str/None)
+    for col in df_show.select_dtypes(include='object').columns:
+        df_show[col] = df_show[col].fillna('').astype(str)
+
     for dc in ['Inst RI','Inst RE','Data RDO Aceite']:
         if dc in df_show.columns:
             col_dt = pd.to_datetime(df_show[dc], errors='coerce')
