@@ -248,8 +248,10 @@ with tab1:
         fig_ap = px.bar(df_ap_g.melt('fase'), x='fase', y='value', color='variable',
                         barmode='group', labels={'value':'R$ por AP','variable':''},
                         color_discrete_map={'Receita Média/AP':'#2ca02c','Custo Médio/AP':'#d62728'},
-                        height=350, category_orders={'fase': sorted(df_ap_g['fase'].unique())})
-        fig_ap.update_layout(xaxis_type='category')
+                        height=350, category_orders={'fase': sorted(df_ap_g['fase'].unique())},
+                        text_auto='.3s')
+        fig_ap.update_traces(textposition='outside', textfont_size=12)
+        fig_ap.update_layout(xaxis_type='category', uniformtext_minsize=10, uniformtext_mode='hide')
         st.plotly_chart(fig_ap, use_container_width=True)
     else:
         st.info("Nenhum registro com APs adicionais para os filtros selecionados.")
@@ -659,46 +661,48 @@ with tab3:
 # ══════════════════════════════════════════════════════════════════════════════
 with tab4:
     st.subheader("Relatório Detalhado por INEP")
-    st.caption("Todas as colunas de custo e receita — previsto 24M e parcial gerado até hoje")
 
-    col_display = {
+    # Colunas resumo (≤15 cols) — sempre exibidas com coloração
+    col_resumo = {
         'inep':'INEP','escola':'Escola','uf':'UF','fase':'Fase',
         'parceiro_ri':'Parceiro RI',
-        'responsavel_re':'Resp. RE (IUH)',
-        'fornecedor_re':'Fornecedor RE',
-        'classificacao_re':'Tipo (Broker/Prov/Op)',
         'status_rdo':'Status RDO',
         'kit_previsto':'Kit Prev','kit_real':'Kit Real','aps_ad_impl':'APs Ad.',
-        'data_inst_ri':'Inst RI','data_inst_re':'Inst RE','data_rdo':'Data RDO Aceite',
-        # RE — valores
+        'data_inst_ri':'Inst RI',
+        'receita_parcial':'Rec Parcial','custo_parcial':'Custo Parcial',
+        'margem_parcial':'Margem Parcial','status_parcial':'Status',
+        'margem_24m_real':'Margem 24M Real',
+    }
+    # Colunas detalhe financeiro — exibidas sem coloração em sub-aba
+    col_detalhe = {
+        'inep':'INEP',
+        'responsavel_re':'Resp. RE (IUH)',
+        'fornecedor_re':'Fornecedor RE',
+        'classificacao_re':'Tipo RE',
+        'data_inst_re':'Inst RE','data_rdo':'Data RDO Aceite',
         'rec_mens_re_mensal':'Mens. RE (LPU)',
-        'custo_mensal_re_real':'Valor Contratado RE/mês',
-        'rec_inst_re_prev':'Receita Inst RE (LPU)',
-        'rec_mens_re_24m':'Receita Mens RE 24M',
-        'custo_inst_re_real':'Custo Inst RE Real',
+        'custo_mensal_re_real':'Contratado RE/mês',
+        'rec_inst_re_prev':'Rec Inst RE Prev',
+        'rec_mens_re_24m':'Rec Mens RE 24M',
+        'custo_inst_re_real':'Custo Inst RE',
         'custo_24m_re_orc':'Custo RE 24M Orç','custo_24m_re_real':'Custo RE 24M Real',
-        # RI — valores
         'rec_equip_ri_prev':'Rec Equip RI Prev','rec_serv_ri_prev':'Rec Serv RI Prev',
         'rec_manut_24m_ri':'Manut 24M RI',
         'rec_equip_ri_real':'Rec Equip RI Real','rec_serv_ri_real':'Rec Serv RI Real',
         'custo_serv_ri':'Custo Serv RI','custo_equip_cmv':'CMV RI',
-        # Resumo
-        'receita_parcial':'Rec Parcial','custo_parcial':'Custo Parcial',
-        'margem_parcial':'Margem Parcial','status_parcial':'Status',
         'receita_24m_total_real':'Rec 24M Real','custo_24m_total_real':'Custo 24M Real',
-        'margem_24m_real':'Margem 24M Real',
     }
-    existing = {k:v for k,v in col_display.items() if k in df_f.columns}
-    df_show = df_f[list(existing.keys())].rename(columns=existing).copy()
 
-    # Garantir que colunas object não tenham None (Arrow não serializa mixed str/None)
-    for col in df_show.select_dtypes(include='object').columns:
-        df_show[col] = df_show[col].fillna('').astype(str)
-
-    for dc in ['Inst RI','Inst RE','Data RDO Aceite']:
-        if dc in df_show.columns:
-            col_dt = pd.to_datetime(df_show[dc], errors='coerce')
-            df_show[dc] = col_dt.dt.strftime('%d/%m/%Y').where(col_dt.notna(), '')
+    def _build_show(df_src, col_map):
+        ex = {k:v for k,v in col_map.items() if k in df_src.columns}
+        ds = df_src[list(ex.keys())].rename(columns=ex).copy()
+        for col in ds.select_dtypes(include='object').columns:
+            ds[col] = ds[col].fillna('').astype(str)
+        for dc in ['Inst RI','Inst RE','Data RDO Aceite']:
+            if dc in ds.columns:
+                col_dt = pd.to_datetime(ds[dc], errors='coerce')
+                ds[dc] = col_dt.dt.strftime('%d/%m/%Y').where(col_dt.notna(), '')
+        return ds
 
     def colorir(val):
         if isinstance(val, str):
@@ -709,13 +713,22 @@ with tab4:
             if val < 0: return 'color:#9c0006; font-weight:bold'
         return ''
 
-    # Streamlit Styler tem limite de 262143 células (rows × cols)
-    _cells = df_show.shape[0] * df_show.shape[1]
-    st.dataframe(
-        df_show.style.map(colorir) if _cells <= 262143 else df_show,
-        use_container_width=True, hide_index=True, height=520,
-    )
-    st.caption(f"{len(df_show):,} registros")
+    sub1, sub2 = st.tabs(["📊 Resumo (com status)", "💰 Detalhe financeiro"])
+
+    with sub1:
+        df_res = _build_show(df_f, col_resumo)
+        # 15 colunas: limite 262143 / 15 ≈ 17476 linhas para styling
+        _cells = df_res.shape[0] * df_res.shape[1]
+        st.dataframe(
+            df_res.style.map(colorir) if _cells <= 262143 else df_res,
+            use_container_width=True, hide_index=True, height=520,
+        )
+        st.caption(f"{len(df_res):,} registros")
+
+    with sub2:
+        df_det = _build_show(df_f, col_detalhe)
+        st.dataframe(df_det, use_container_width=True, hide_index=True, height=520)
+        st.caption(f"{len(df_det):,} registros")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ABA 5 — EXPORTAR
