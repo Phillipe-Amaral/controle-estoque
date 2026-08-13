@@ -709,8 +709,10 @@ with tab4:
             if val < 0: return 'color:#9c0006; font-weight:bold'
         return ''
 
+    # Streamlit Styler tem limite de 262143 células (rows × cols)
+    _cells = df_show.shape[0] * df_show.shape[1]
     st.dataframe(
-        df_show.style.map(colorir),
+        df_show.style.map(colorir) if _cells <= 262143 else df_show,
         use_container_width=True, hide_index=True, height=520,
     )
     st.caption(f"{len(df_show):,} registros")
