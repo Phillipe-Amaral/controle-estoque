@@ -19,6 +19,12 @@ def get_client():
 
 sb = get_client()
 
+# UFs base do projeto — inclui CE, PI, RN e todos os estados
+BASE_UFS = {"AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT",
+            "PA","PB","PE","PI","PR","RJ","RN","RO","RR","RS","SC","SE","SP","TO"}
+
+FASES = ["4.1", "4.2", "4.2 ADICIONAL", "5.0", "TELEBRAS", "SATÉLITE"]
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 @st.cache_data(ttl=30)
 def carregar_parceiros():
@@ -30,23 +36,19 @@ def carregar_itens():
     r = sb.table("itens").select("id, nome, fabricante").order("nome").execute()
     return r.data
 
-FASES = ["4.1", "4.2", "4.2 ADICIONAL", "5.0", "SATÉLITE"]
-
 @st.cache_data(ttl=600)
 def carregar_ufs_disponiveis():
-    """Retorna lista de UFs presentes nas execuções."""
     rows, offset = [], 0
     while True:
         r = sb.table("execucoes").select("uf").range(offset, offset + 999).execute()
         rows.extend(r.data)
         if len(r.data) < 1000: break
         offset += 1000
-    ufs = sorted({(row.get("uf") or "").strip().upper() for row in rows if row.get("uf")})
-    return ufs
+    ufs_exec = {(row.get("uf") or "").strip().upper() for row in rows if row.get("uf")}
+    return sorted(BASE_UFS | ufs_exec)
 
 @st.cache_data(ttl=30)
 def carregar_uf_parceiros():
-    """Retorna {parceiro_id: UF_principal} derivado das execuções reais."""
     rp = sb.table("parceiros").select("id, uf").execute().data
     id_to_uf = {p["id"]: (p.get("uf") or "") for p in rp}
     exec_rows, offset = [], 0
@@ -55,7 +57,6 @@ def carregar_uf_parceiros():
         exec_rows.extend(r.data)
         if len(r.data) < 1000: break
         offset += 1000
-    # UF mais frequente por parceiro via execuções
     from collections import Counter
     freq: dict = {}
     for row in exec_rows:
@@ -69,7 +70,6 @@ def carregar_uf_parceiros():
 
 @st.cache_data(ttl=30)
 def carregar_transferencias():
-    # Usa select("*") para pegar uf_origem/uf_destino se já existirem na tabela
     r = (sb.table("transferencias")
          .select("*")
          .order("id", desc=True)
@@ -78,7 +78,7 @@ def carregar_transferencias():
     ri = sb.table("itens").select("id, nome").execute()
     parc_map = {p["id"]: p["nome"] for p in rp.data}
     item_map = {i["id"]: i["nome"] for i in ri.data}
-    uf_map   = carregar_uf_parceiros()   # fallback para registros sem UF
+    uf_map   = carregar_uf_parceiros()
 
     rows = []
     for t in r.data:
@@ -111,7 +111,7 @@ page_header("🔄 Transferências entre Parceiros", "Registre e acompanhe movime
 tab1, tab2, tab3 = st.tabs(["➕ Nova Transferência", "✅ Confirmar Recebimento", "📋 Histórico"])
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ABA 1 — NOVA TRANSFERÊNCIA
+# ABA 1 — NOVA TRANSFERÊNCIA (multi-item)
 # ══════════════════════════════════════════════════════════════════════════════
 with tab1:
     st.subheader("Registrar nova transferência")
@@ -123,79 +123,116 @@ with tab1:
     nomes_parceiros = list(parceiros.keys())
     ufs_disp = carregar_ufs_disponiveis()
 
-    with st.form("form_transf", clear_on_submit=True):
-        # ── Origem ────────────────────────────────────────────────────────────
-        st.markdown("**Origem**")
-        col1, col2, col_ufo = st.columns([3, 2, 1])
-        with col1:
-            origem_sel  = st.selectbox("Parceiro de Origem *", nomes_parceiros, key="orig_parc")
-        with col2:
-            fase_origem = st.selectbox("Fase de Origem *", FASES, key="orig_fase")
-        with col_ufo:
-            uf_origem   = st.selectbox("UF Origem", ufs_disp, key="orig_uf")
+    # ── Cabeçalho da transferência (origem / destino) ──────────────────────────
+    st.markdown("**Origem**")
+    col1, col2, col_ufo = st.columns([3, 2, 1])
+    with col1:
+        origem_sel  = st.selectbox("Parceiro de Origem *", nomes_parceiros, key="orig_parc")
+    with col2:
+        fase_origem = st.selectbox("Fase de Origem *", FASES, key="orig_fase")
+    with col_ufo:
+        uf_origem   = st.selectbox("UF Origem", ufs_disp, key="orig_uf")
 
-        st.markdown("**Destino**")
-        col3, col4, col_ufd = st.columns([3, 2, 1])
-        with col3:
-            destino_sel = st.selectbox("Parceiro de Destino *", nomes_parceiros, key="dest_parc")
-        with col4:
-            fase_destino = st.selectbox("Fase de Destino *", FASES, key="dest_fase")
-        with col_ufd:
-            uf_destino  = st.selectbox("UF Destino", ufs_disp, key="dest_uf")
+    st.markdown("**Destino**")
+    col3, col4, col_ufd = st.columns([3, 2, 1])
+    with col3:
+        destino_sel = st.selectbox("Parceiro de Destino *", nomes_parceiros, key="dest_parc")
+    with col4:
+        fase_destino = st.selectbox("Fase de Destino *", FASES, key="dest_fase")
+    with col_ufd:
+        uf_destino  = st.selectbox("UF Destino", ufs_disp, key="dest_uf")
 
-        # ── Item / Qtd / Data ─────────────────────────────────────────────────
-        st.markdown("**Material**")
-        col5, col6, col7 = st.columns([3, 1, 1])
-        with col5:
-            item_sel = st.selectbox("Item *", list(itens_dict.keys()))
-        with col6:
-            qtd = st.number_input("Quantidade *", min_value=1, value=1)
-        with col7:
-            data_transf = st.date_input("Data", value=date.today())
+    data_transf = st.date_input("Data da Transferência", value=date.today(), key="data_transf")
+    motivo_geral = st.text_input("Motivo / Observação", key="motivo_geral")
 
-        motivo = st.text_input("Motivo / Observação")
-        submitted = st.form_submit_button("📤 Registrar Transferência", use_container_width=True, type="primary")
+    # ── Lista de itens (session_state) ────────────────────────────────────────
+    if "itens_transf" not in st.session_state:
+        st.session_state.itens_transf = [{"item": None, "qtd": 1}]
 
-    if submitted:
-        mesma_origem = (origem_sel == destino_sel and fase_origem == fase_destino)
-        if mesma_origem:
+    st.markdown("**Materiais**")
+
+    itens_opcoes = list(itens_dict.keys())
+    remover_idx = None
+
+    for idx, linha in enumerate(st.session_state.itens_transf):
+        c1, c2, c3 = st.columns([5, 2, 1])
+        with c1:
+            item_val = st.selectbox(
+                f"Item {idx+1}",
+                itens_opcoes,
+                index=itens_opcoes.index(linha["item"]) if linha["item"] in itens_opcoes else 0,
+                key=f"item_{idx}",
+            )
+        with c2:
+            qtd_val = st.number_input(f"Qtd {idx+1}", min_value=1, value=linha["qtd"],
+                                      key=f"qtd_{idx}")
+        with c3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if len(st.session_state.itens_transf) > 1:
+                if st.button("🗑️", key=f"rem_{idx}", help="Remover item"):
+                    remover_idx = idx
+
+        st.session_state.itens_transf[idx]["item"] = item_val
+        st.session_state.itens_transf[idx]["qtd"]  = int(qtd_val)
+
+    if remover_idx is not None:
+        st.session_state.itens_transf.pop(remover_idx)
+        st.rerun()
+
+    col_add, col_reg = st.columns([1, 3])
+    with col_add:
+        if st.button("➕ Adicionar Item", use_container_width=True):
+            st.session_state.itens_transf.append({"item": None, "qtd": 1})
+            st.rerun()
+
+    with col_reg:
+        registrar = st.button("📤 Registrar Transferência", type="primary", use_container_width=True)
+
+    if registrar:
+        if origem_sel == destino_sel and fase_origem == fase_destino:
             st.error("Origem e destino não podem ser o mesmo parceiro + fase.")
         else:
-            payload = {
-                "parceiro_origem_id":  parceiros[origem_sel],
-                "parceiro_destino_id": parceiros[destino_sel],
-                "item_id":             itens_dict[item_sel],
-                "qtd":                 int(qtd),
-                "fase":                fase_origem,
-                "fase_origem":         fase_origem,
-                "fase_destino":        fase_destino,
-                "uf_origem":           uf_origem or None,
-                "uf_destino":          uf_destino or None,
-                "motivo":              motivo or None,
-                "data_transferencia":  str(data_transf),
-                "status":              "pendente",
-            }
-            try:
-                sb.table("transferencias").insert(payload).execute()
-            except Exception as e:
-                if "uf_origem" in str(e) or "uf_destino" in str(e):
-                    # Colunas ainda não existem no banco — insere sem elas
-                    payload.pop("uf_origem", None)
-                    payload.pop("uf_destino", None)
-                    try:
-                        sb.table("transferencias").insert(payload).execute()
-                    except Exception as e2:
-                        st.error(f"Erro ao registrar: {e2}")
-                        st.stop()
-                else:
-                    st.error(f"Erro ao registrar: {e}")
-                    st.stop()
-            destino_label = f"**{destino_sel}** (fase {fase_destino})"
-            if fase_origem != fase_destino:
-                destino_label += f" — transferência entre fases ({fase_origem} → {fase_destino})"
-            st.success(f"✅ Transferência registrada! Aguardando confirmação de {destino_label}.")
-            st.cache_data.clear()
-            st.rerun()
+            erros = []
+            sucessos = 0
+            for linha in st.session_state.itens_transf:
+                if not linha["item"]:
+                    continue
+                payload = {
+                    "parceiro_origem_id":  parceiros[origem_sel],
+                    "parceiro_destino_id": parceiros[destino_sel],
+                    "item_id":             itens_dict[linha["item"]],
+                    "qtd":                 int(linha["qtd"]),
+                    "fase":                fase_origem,
+                    "fase_origem":         fase_origem,
+                    "fase_destino":        fase_destino,
+                    "uf_origem":           uf_origem or None,
+                    "uf_destino":          uf_destino or None,
+                    "motivo":              motivo_geral or None,
+                    "data_transferencia":  str(data_transf),
+                    "status":              "pendente",
+                }
+                try:
+                    sb.table("transferencias").insert(payload).execute()
+                    sucessos += 1
+                except Exception as e:
+                    if "uf_origem" in str(e) or "uf_destino" in str(e):
+                        payload.pop("uf_origem", None)
+                        payload.pop("uf_destino", None)
+                        try:
+                            sb.table("transferencias").insert(payload).execute()
+                            sucessos += 1
+                        except Exception as e2:
+                            erros.append(f"{linha['item']}: {e2}")
+                    else:
+                        erros.append(f"{linha['item']}: {e}")
+
+            if sucessos:
+                st.success(f"✅ {sucessos} item(ns) registrado(s)! Aguardando confirmação de **{destino_sel}** (fase {fase_destino}).")
+                st.session_state.itens_transf = [{"item": None, "qtd": 1}]
+                st.cache_data.clear()
+                st.rerun()
+            for err in erros:
+                st.error(err)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ABA 2 — CONFIRMAR RECEBIMENTO

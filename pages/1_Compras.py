@@ -20,6 +20,12 @@ def get_client():
 
 sb = get_client()
 
+# UFs base do projeto — garante que CE, PI, RN e demais apareçam mesmo sem execuções
+BASE_UFS = {"AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT",
+            "PA","PB","PE","PI","PR","RJ","RN","RO","RR","RS","SC","SE","SP","TO"}
+
+FASES = ["4.1", "4.2", "4.2 ADICIONAL", "5.0", "TELEBRAS"]
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 @st.cache_data(ttl=30)
 def carregar_parceiros():
@@ -39,14 +45,13 @@ def carregar_ufs_disponiveis():
         rows.extend(r.data)
         if len(r.data) < 1000: break
         offset += 1000
-    return sorted({(row.get("uf") or "").strip().upper() for row in rows if row.get("uf")})
+    ufs_exec = {(row.get("uf") or "").strip().upper() for row in rows if row.get("uf")}
+    return sorted(BASE_UFS | ufs_exec)
 
 @st.cache_data(ttl=30)
 def carregar_uf_parceiros():
-    """Retorna dict {parceiro_id: set_of_ufs} a partir das execuções reais."""
     rp = sb.table("parceiros").select("id, nome, uf").execute().data
     id_to_nome = {p["id"]: p["nome"] for p in rp}
-    # UF cadastral como fallback
     id_to_uf_cadastro = {p["id"]: (p.get("uf") or "") for p in rp}
 
     exec_rows, offset = [], 0
@@ -62,11 +67,9 @@ def carregar_uf_parceiros():
         uf  = (row.get("uf") or "").strip().upper()
         if pid and uf:
             id_to_ufs.setdefault(pid, set()).add(uf)
-    # Para IDs sem execuções, usa UF cadastral
     for pid, uf in id_to_uf_cadastro.items():
         if pid not in id_to_ufs and uf:
             id_to_ufs[pid] = {uf}
-    # Retorna string ordenada (ex: "ES, MG, RJ")
     return {pid: ", ".join(sorted(ufs)) for pid, ufs in id_to_ufs.items()}
 
 @st.cache_data(ttl=30)
@@ -126,7 +129,7 @@ with tab1:
             fornecedor   = st.text_input("Fornecedor")
             colfa, coluf = st.columns([2, 1])
             with colfa:
-                fase     = st.selectbox("Fase", ["4.1", "4.2", "4.2 ADICIONAL", "5.0"])
+                fase     = st.selectbox("Fase / Projeto", FASES)
             with coluf:
                 uf_compra = st.selectbox("UF", ufs_disp)
         with col2:
@@ -177,8 +180,6 @@ with tab2:
     st.subheader("Confirmar recebimento de mercadoria")
 
     df_compras = carregar_compras()
-
-    # Mostra apenas compras onde qtd_recebida < qtd_pedida
     df_pendentes = df_compras[df_compras["Qtd Recebida"] < df_compras["Qtd Pedida"]].copy()
 
     if df_pendentes.empty:
@@ -189,32 +190,54 @@ with tab2:
                      use_container_width=True, hide_index=True)
 
         st.markdown("---")
-        st.markdown("**Registrar recebimento:**")
+
+        acao = st.radio("Ação", ["✅ Confirmar Recebimento", "🚫 Cancelar / Recusar Pedido"],
+                        horizontal=True, key="acao_tab2")
 
         col1, col2, col3 = st.columns(3)
         with col1:
             id_sel = st.number_input("ID da Compra", min_value=1, step=1)
-        with col2:
-            qtd_rec = st.number_input("Qtd Recebida", min_value=1, step=1)
-        with col3:
-            data_rec = st.date_input("Data de Recebimento", value=date.today())
 
-        nf_rec = st.text_input("Nota Fiscal (NF)", key="nf_rec")
+        if acao == "✅ Confirmar Recebimento":
+            with col2:
+                qtd_rec = st.number_input("Qtd Recebida", min_value=1, step=1)
+            with col3:
+                data_rec = st.date_input("Data de Recebimento", value=date.today())
 
-        if st.button("✅ Confirmar Recebimento", type="primary", use_container_width=True):
-            try:
-                update_data = {
-                    "qtd_recebida":      int(qtd_rec),
-                    "data_recebimento":  str(data_rec),
-                }
-                if nf_rec:
-                    update_data["nf"] = nf_rec
-                sb.table("compras").update(update_data).eq("id", int(id_sel)).execute()
-                st.success(f"✅ Recebimento da compra #{id_sel} confirmado!")
-                st.cache_data.clear()
-                st.rerun()
-            except Exception as e:
-                st.error(f"Erro: {e}")
+            nf_rec = st.text_input("Nota Fiscal (NF)", key="nf_rec")
+
+            if st.button("✅ Confirmar Recebimento", type="primary", use_container_width=True):
+                try:
+                    update_data = {
+                        "qtd_recebida":     int(qtd_rec),
+                        "data_recebimento": str(data_rec),
+                    }
+                    if nf_rec:
+                        update_data["nf"] = nf_rec
+                    sb.table("compras").update(update_data).eq("id", int(id_sel)).execute()
+                    st.success(f"✅ Recebimento da compra #{id_sel} confirmado!")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro: {e}")
+
+        else:  # Cancelar / Recusar
+            motivo_cancel = st.text_input("Motivo do cancelamento / recusa", key="motivo_cancel")
+            confirmar = st.checkbox(f"Confirmo que desejo cancelar/excluir o pedido #{int(id_sel)}", key="chk_cancel")
+
+            if st.button("🚫 Cancelar / Recusar Pedido", type="secondary", use_container_width=True):
+                if not confirmar:
+                    st.warning("Marque a caixa de confirmação antes de cancelar.")
+                else:
+                    try:
+                        sb.table("compras").delete().eq("id", int(id_sel)).execute()
+                        st.success(f"🗑️ Pedido #{id_sel} cancelado e removido do sistema.")
+                        if motivo_cancel:
+                            st.info(f"Motivo registrado: {motivo_cancel}")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao cancelar: {e}")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ABA 3 — HISTÓRICO
