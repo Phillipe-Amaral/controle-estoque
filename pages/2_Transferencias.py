@@ -19,7 +19,6 @@ def get_client():
 
 sb = get_client()
 
-# UFs base do projeto — inclui CE, PI, RN e todos os estados
 BASE_UFS = {"AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT",
             "PA","PB","PE","PI","PR","RJ","RN","RO","RR","RS","SC","SE","SP","TO"}
 
@@ -105,13 +104,17 @@ def carregar_transferencias():
                "Item","Qtd","Motivo","Data","Status","Data Aceite"]
     return pd.DataFrame(rows, columns=colunas) if rows else pd.DataFrame(columns=colunas)
 
+def get_transferencia_raw(id_transf):
+    r = sb.table("transferencias").select("*").eq("id", int(id_transf)).execute()
+    return r.data[0] if r.data else None
+
 # ── Título ────────────────────────────────────────────────────────────────────
 page_header("🔄 Transferências entre Parceiros", "Registre e acompanhe movimentações de material entre parceiros")
 
-tab1, tab2, tab3 = st.tabs(["➕ Nova Transferência", "✅ Confirmar Recebimento", "📋 Histórico"])
+tab1, tab2, tab3, tab4 = st.tabs(["➕ Nova Transferência", "✅ Confirmar Recebimento", "✏️ Editar Transferência", "📋 Histórico"])
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ABA 1 — NOVA TRANSFERÊNCIA (multi-item)
+# ABA 1 — NOVA TRANSFERÊNCIA
 # ══════════════════════════════════════════════════════════════════════════════
 with tab1:
     st.subheader("Registrar nova transferência")
@@ -123,7 +126,6 @@ with tab1:
     nomes_parceiros = list(parceiros.keys())
     ufs_disp = carregar_ufs_disponiveis()
 
-    # ── Cabeçalho da transferência (origem / destino) ──────────────────────────
     st.markdown("**Origem**")
     col1, col2, col_ufo = st.columns([3, 2, 1])
     with col1:
@@ -145,12 +147,10 @@ with tab1:
     data_transf = st.date_input("Data da Transferência", value=date.today(), key="data_transf")
     motivo_geral = st.text_input("Motivo / Observação", key="motivo_geral")
 
-    # ── Lista de itens (session_state) ────────────────────────────────────────
     if "itens_transf" not in st.session_state:
         st.session_state.itens_transf = [{"item": None, "qtd": 1}]
 
     st.markdown("**Materiais**")
-
     itens_opcoes = list(itens_dict.keys())
     remover_idx = None
 
@@ -158,20 +158,17 @@ with tab1:
         c1, c2, c3 = st.columns([5, 2, 1])
         with c1:
             item_val = st.selectbox(
-                f"Item {idx+1}",
-                itens_opcoes,
+                f"Item {idx+1}", itens_opcoes,
                 index=itens_opcoes.index(linha["item"]) if linha["item"] in itens_opcoes else 0,
                 key=f"item_{idx}",
             )
         with c2:
-            qtd_val = st.number_input(f"Qtd {idx+1}", min_value=1, value=linha["qtd"],
-                                      key=f"qtd_{idx}")
+            qtd_val = st.number_input(f"Qtd {idx+1}", min_value=1, value=linha["qtd"], key=f"qtd_{idx}")
         with c3:
             st.markdown("<br>", unsafe_allow_html=True)
             if len(st.session_state.itens_transf) > 1:
                 if st.button("🗑️", key=f"rem_{idx}", help="Remover item"):
                     remover_idx = idx
-
         st.session_state.itens_transf[idx]["item"] = item_val
         st.session_state.itens_transf[idx]["qtd"]  = int(qtd_val)
 
@@ -184,7 +181,6 @@ with tab1:
         if st.button("➕ Adicionar Item", use_container_width=True):
             st.session_state.itens_transf.append({"item": None, "qtd": 1})
             st.rerun()
-
     with col_reg:
         registrar = st.button("📤 Registrar Transferência", type="primary", use_container_width=True)
 
@@ -235,7 +231,7 @@ with tab1:
                 st.error(err)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ABA 2 — CONFIRMAR RECEBIMENTO
+# ABA 2 — CONFIRMAR RECEBIMENTO (com aceite parcial)
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
     st.subheader("Confirmar ou rejeitar transferências pendentes")
@@ -257,34 +253,202 @@ with tab2:
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            id_sel = st.number_input("ID da Transferência", min_value=1, step=1)
+            id_sel = st.number_input("ID da Transferência", min_value=1, step=1, key="id_aceite")
         with col2:
-            decisao = st.selectbox("Decisão", ["aceito", "rejeitado"])
+            decisao = st.selectbox("Decisão", ["aceito", "aceito parcial", "rejeitado"], key="dec_aceite",
+                help="'aceito parcial': registra o que chegou e mantém o saldo restante pendente")
         with col3:
-            data_aceite = st.date_input("Data", value=date.today())
+            data_aceite = st.date_input("Data", value=date.today(), key="dt_aceite")
 
-        obs = st.text_input("Observação (opcional)", key="obs_aceite")
+        # Buscar qtd original para pré-preencher
+        transf_raw = get_transferencia_raw(int(id_sel)) if id_sel else None
+        qtd_original = transf_raw["qtd"] if transf_raw else 1
+
+        if decisao == "aceito parcial":
+            col_qtd, col_obs = st.columns([1, 2])
+            with col_qtd:
+                qtd_aceita = st.number_input(
+                    "Qtd efetivamente recebida",
+                    min_value=1,
+                    max_value=int(qtd_original),
+                    value=int(qtd_original),
+                    step=1,
+                    key="qtd_aceita",
+                    help=f"Qtd original da transferência: {qtd_original}"
+                )
+            with col_obs:
+                obs_aceite = st.text_input("Observação (opcional)", key="obs_aceite_parc")
+
+            qtd_restante = int(qtd_original) - int(qtd_aceita)
+            if qtd_restante > 0:
+                st.info(f"📦 Serão aceitas **{qtd_aceita}** unidades. As **{qtd_restante}** restantes ficarão como **pendente** para complemento futuro.")
+            else:
+                st.warning("A quantidade informada é igual ao total — use a opção 'aceito' para aceite completo.")
+
+        elif decisao == "aceito":
+            col_qtd2, col_obs2 = st.columns([1, 2])
+            with col_qtd2:
+                qtd_aceita_full = st.number_input(
+                    "Qtd recebida",
+                    min_value=1,
+                    value=int(qtd_original),
+                    step=1,
+                    key="qtd_aceita_full",
+                    help=f"Qtd original: {qtd_original}. Ajuste se houver divergência."
+                )
+            with col_obs2:
+                obs_aceite = st.text_input("Observação (opcional)", key="obs_aceite_full")
+        else:
+            obs_aceite = st.text_input("Motivo da rejeição (opcional)", key="obs_rejeito")
 
         if st.button("✅ Confirmar Decisão", type="primary", use_container_width=True):
+            if not transf_raw:
+                st.error(f"Transferência #{id_sel} não encontrada ou não está pendente.")
+            else:
+                try:
+                    if decisao == "aceito":
+                        qtd_rec = int(qtd_aceita_full)
+                        update_data = {"status": "aceito", "data_aceite": str(data_aceite)}
+                        if qtd_rec != int(qtd_original):
+                            update_data["qtd"] = qtd_rec
+                        if obs_aceite:
+                            motivo_atual = transf_raw.get("motivo") or ""
+                            update_data["motivo"] = (motivo_atual + f" | Obs aceite: {obs_aceite}").strip(" |")
+                        sb.table("transferencias").update(update_data).eq("id", int(id_sel)).execute()
+
+                        if qtd_rec != int(qtd_original):
+                            st.success(f"✅ Transferência #{id_sel} aceita com {qtd_rec} unidades (original: {qtd_original}).")
+                        else:
+                            st.success(f"✅ Transferência #{id_sel} aceita!")
+
+                    elif decisao == "aceito parcial":
+                        qtd_ac = int(qtd_aceita)
+                        qtd_rest = int(qtd_original) - qtd_ac
+
+                        if qtd_rest <= 0:
+                            st.error("Para aceite total, use a opção 'aceito'.")
+                        else:
+                            # Atualiza registro original com qtd aceita
+                            motivo_orig = transf_raw.get("motivo") or ""
+                            obs_str = f" | Aceite parcial: {qtd_ac}/{qtd_original}"
+                            if obs_aceite:
+                                obs_str += f" | {obs_aceite}"
+                            sb.table("transferencias").update({
+                                "status":      "aceito",
+                                "qtd":         qtd_ac,
+                                "data_aceite": str(data_aceite),
+                                "motivo":      (motivo_orig + obs_str).strip(" |"),
+                            }).eq("id", int(id_sel)).execute()
+
+                            # Cria novo registro pendente para o saldo restante
+                            novo = {k: transf_raw[k] for k in transf_raw if k not in ("id", "criado_em", "status", "data_aceite")}
+                            novo["qtd"]    = qtd_rest
+                            novo["status"] = "pendente"
+                            novo["motivo"] = f"[SALDO PARCIAL de #{id_sel}] {motivo_orig}".strip()
+                            sb.table("transferencias").insert(novo).execute()
+
+                            st.success(f"✅ Aceite parcial registrado! **{qtd_ac}** aceitas. **{qtd_rest}** restantes ficam como pendente.")
+
+                    else:  # rejeitado
+                        update_data = {"status": "rejeitado", "data_aceite": str(data_aceite)}
+                        if obs_aceite:
+                            motivo_atual = transf_raw.get("motivo") or ""
+                            update_data["motivo"] = (motivo_atual + f" | Motivo rejeição: {obs_aceite}").strip(" |")
+                        sb.table("transferencias").update(update_data).eq("id", int(id_sel)).execute()
+                        st.success(f"❌ Transferência #{id_sel} rejeitada.")
+
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro: {e}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ABA 3 — EDITAR TRANSFERÊNCIA
+# ══════════════════════════════════════════════════════════════════════════════
+with tab3:
+    st.subheader("Editar dados de uma transferência")
+    st.caption("Use para corrigir parceiro de origem/destino, fases ou UFs informados incorretamente.")
+
+    parceiros_edit = carregar_parceiros()
+    nomes_parc_edit = list(parceiros_edit.keys())
+    id_para_nome_parc = {v: k for k, v in parceiros_edit.items()}
+    ufs_edit = carregar_ufs_disponiveis()
+
+    id_edit = st.number_input("ID da Transferência a editar", min_value=1, step=1, key="id_edit_transf")
+
+    if st.button("🔍 Carregar dados", key="btn_carregar_edit"):
+        st.session_state["transf_edit_data"] = get_transferencia_raw(int(id_edit))
+
+    t_edit = st.session_state.get("transf_edit_data")
+
+    if t_edit:
+        st.markdown(f"**Transferência #{t_edit['id']}** — Status: `{t_edit.get('status','')}`")
+
+        orig_nome  = id_para_nome_parc.get(t_edit.get("parceiro_origem_id"), nomes_parc_edit[0])
+        dest_nome  = id_para_nome_parc.get(t_edit.get("parceiro_destino_id"), nomes_parc_edit[0])
+        fo_atual   = t_edit.get("fase_origem") or t_edit.get("fase") or FASES[0]
+        fd_atual   = t_edit.get("fase_destino") or t_edit.get("fase") or FASES[0]
+        ufo_atual  = t_edit.get("uf_origem") or ""
+        ufd_atual  = t_edit.get("uf_destino") or ""
+
+        st.markdown("**Origem**")
+        c1, c2, c3 = st.columns([3, 2, 1])
+        with c1:
+            orig_edit = st.selectbox("Parceiro de Origem", nomes_parc_edit,
+                                     index=nomes_parc_edit.index(orig_nome) if orig_nome in nomes_parc_edit else 0,
+                                     key="edit_orig")
+        with c2:
+            fo_edit = st.selectbox("Fase de Origem", FASES,
+                                   index=FASES.index(fo_atual) if fo_atual in FASES else 0,
+                                   key="edit_fo")
+        with c3:
+            ufo_edit = st.selectbox("UF Origem", ufs_edit,
+                                    index=ufs_edit.index(ufo_atual) if ufo_atual in ufs_edit else 0,
+                                    key="edit_ufo")
+
+        st.markdown("**Destino**")
+        c4, c5, c6 = st.columns([3, 2, 1])
+        with c4:
+            dest_edit = st.selectbox("Parceiro de Destino", nomes_parc_edit,
+                                     index=nomes_parc_edit.index(dest_nome) if dest_nome in nomes_parc_edit else 0,
+                                     key="edit_dest")
+        with c5:
+            fd_edit = st.selectbox("Fase de Destino", FASES,
+                                   index=FASES.index(fd_atual) if fd_atual in FASES else 0,
+                                   key="edit_fd")
+        with c6:
+            ufd_edit = st.selectbox("UF Destino", ufs_edit,
+                                    index=ufs_edit.index(ufd_atual) if ufd_atual in ufs_edit else 0,
+                                    key="edit_ufd")
+
+        motivo_edit = st.text_input("Motivo / Observação", value=t_edit.get("motivo") or "", key="edit_motivo")
+
+        if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
             try:
-                update_data = {
-                    "status":      decisao,
-                    "data_aceite": str(data_aceite),
+                payload_edit = {
+                    "parceiro_origem_id":  parceiros_edit[orig_edit],
+                    "parceiro_destino_id": parceiros_edit[dest_edit],
+                    "fase":                fo_edit,
+                    "fase_origem":         fo_edit,
+                    "fase_destino":        fd_edit,
+                    "uf_origem":           ufo_edit or None,
+                    "uf_destino":          ufd_edit or None,
+                    "motivo":              motivo_edit or None,
                 }
-                if obs:
-                    update_data["motivo"] = obs
-                sb.table("transferencias").update(update_data).eq("id", int(id_sel)).execute()
-                icone = "✅" if decisao == "aceito" else "❌"
-                st.success(f"{icone} Transferência #{id_sel} marcada como **{decisao}**!")
+                sb.table("transferencias").update(payload_edit).eq("id", int(t_edit["id"])).execute()
+                st.success(f"✅ Transferência #{t_edit['id']} atualizada!")
+                st.session_state.pop("transf_edit_data", None)
                 st.cache_data.clear()
                 st.rerun()
             except Exception as e:
                 st.error(f"Erro: {e}")
+    elif "transf_edit_data" in st.session_state:
+        st.error(f"Transferência #{id_edit} não encontrada.")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ABA 3 — HISTÓRICO
+# ABA 4 — HISTÓRICO
 # ══════════════════════════════════════════════════════════════════════════════
-with tab3:
+with tab4:
     st.subheader("Histórico de transferências")
 
     df_hist = carregar_transferencias()
@@ -324,9 +488,9 @@ with tab3:
         df_view = df_view[df_view["Fase Origem"] != df_view["Fase Destino"]]
 
     def colorir_status(val):
-        if val == "aceito":     return "background-color:#d4edda; color:#155724"
-        if val == "pendente":   return "background-color:#fff3cd; color:#856404"
-        if val == "rejeitado":  return "background-color:#f8d7da; color:#721c24"
+        if val == "aceito":    return "background-color:#d4edda; color:#155724"
+        if val == "pendente":  return "background-color:#fff3cd; color:#856404"
+        if val == "rejeitado": return "background-color:#f8d7da; color:#721c24"
         return ""
 
     st.dataframe(

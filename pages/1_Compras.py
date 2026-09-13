@@ -191,20 +191,38 @@ with tab2:
 
         st.markdown("---")
 
-        acao = st.radio("Ação", ["✅ Confirmar Recebimento", "🚫 Cancelar / Recusar Pedido"],
-                        horizontal=True, key="acao_tab2")
+        acao = st.radio(
+            "Ação",
+            ["✅ Confirmar Recebimento", "📦 Encerrar com recebimento parcial", "🚫 Cancelar / Recusar Pedido"],
+            horizontal=True, key="acao_tab2",
+            help="'Encerrar com recebimento parcial': registra que o restante não será entregue, sem apagar o que foi recebido."
+        )
 
         col1, col2, col3 = st.columns(3)
         with col1:
             id_sel = st.number_input("ID da Compra", min_value=1, step=1)
 
+        # Buscar qtd pedida e recebida atuais para o ID informado
+        compra_atual = None
+        if id_sel:
+            r_compra = sb.table("compras").select("id,qtd_pedida,qtd_recebida").eq("id", int(id_sel)).execute()
+            if r_compra.data:
+                compra_atual = r_compra.data[0]
+
         if acao == "✅ Confirmar Recebimento":
             with col2:
-                qtd_rec = st.number_input("Qtd Recebida", min_value=1, step=1)
+                qtd_rec = st.number_input("Qtd Recebida", min_value=1, step=1,
+                                          value=int(compra_atual["qtd_pedida"]) if compra_atual else 1)
             with col3:
                 data_rec = st.date_input("Data de Recebimento", value=date.today())
 
             nf_rec = st.text_input("Nota Fiscal (NF)", key="nf_rec")
+
+            if compra_atual:
+                qtd_ped = compra_atual["qtd_pedida"]
+                qtd_ant = compra_atual["qtd_recebida"] or 0
+                if int(qtd_rec) < int(qtd_ped):
+                    st.info(f"📦 Pedido #{id_sel}: {qtd_ped} pedidas, {qtd_ant} já recebidas. Ao confirmar {int(qtd_rec)}, restará **{int(qtd_ped) - int(qtd_rec)}** pendente.")
 
             if st.button("✅ Confirmar Recebimento", type="primary", use_container_width=True):
                 try:
@@ -220,6 +238,49 @@ with tab2:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro: {e}")
+
+        elif acao == "📦 Encerrar com recebimento parcial":
+            if compra_atual:
+                qtd_ped = int(compra_atual["qtd_pedida"])
+                qtd_rec_atual = int(compra_atual["qtd_recebida"] or 0)
+                qtd_nao_entregue = qtd_ped - qtd_rec_atual
+
+                if qtd_rec_atual == 0:
+                    st.warning(f"⚠️ A compra #{id_sel} não tem nenhuma unidade recebida ainda. Use 'Confirmar Recebimento' antes, ou 'Cancelar / Recusar Pedido' para cancelar totalmente.")
+                elif qtd_nao_entregue <= 0:
+                    st.info(f"✅ A compra #{id_sel} já está totalmente recebida ({qtd_rec_atual}/{qtd_ped}).")
+                else:
+                    st.warning(
+                        f"📦 Compra #{id_sel}: **{qtd_rec_atual}** unidades recebidas de **{qtd_ped}** pedidas. "
+                        f"As **{qtd_nao_entregue}** restantes serão descartadas — o fornecedor não irá entregar o restante."
+                    )
+                    motivo_enc = st.text_input("Motivo (opcional)", key="motivo_enc_parc",
+                                               placeholder="Ex: fornecedor confirmou que não irá entregar o saldo")
+                    confirmar_enc = st.checkbox(
+                        f"Confirmo que as {qtd_nao_entregue} unidades restantes do pedido #{int(id_sel)} NÃO serão entregues",
+                        key="chk_enc"
+                    )
+                    if st.button("📦 Encerrar recebimento parcial", type="primary", use_container_width=True):
+                        if not confirmar_enc:
+                            st.warning("Marque a caixa de confirmação antes de encerrar.")
+                        else:
+                            try:
+                                # Define qtd_pedida = qtd_recebida para fechar o pendente
+                                sb.table("compras").update({
+                                    "qtd_pedida": qtd_rec_atual,
+                                }).eq("id", int(id_sel)).execute()
+                                st.success(
+                                    f"✅ Pedido #{id_sel} encerrado com recebimento parcial. "
+                                    f"{qtd_rec_atual} unidades mantidas no estoque; {qtd_nao_entregue} canceladas."
+                                )
+                                if motivo_enc:
+                                    st.info(f"Motivo: {motivo_enc}")
+                                st.cache_data.clear()
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro: {e}")
+            else:
+                st.info("Informe o ID da compra acima.")
 
         else:  # Cancelar / Recusar
             motivo_cancel = st.text_input("Motivo do cancelamento / recusa", key="motivo_cancel")
