@@ -68,53 +68,46 @@ def get_client():
 
 sb = get_client()
 
-def _ler_re_excel_raw():
-    """Lê GERAL COMPRA 4.2 sem cache — erros propagam para o chamador."""
-    import openpyxl
-    wb = openpyxl.load_workbook(EXCEL_RE_PATH, data_only=True, read_only=True)
-    ws = wb["GERAL COMPRA 4.2"]
-    rows = []
-    for row in ws.iter_rows(min_row=3, values_only=True):
-        uf    = row[1]   # B
-        vel   = row[8]   # I - Veloc. Mbps Download
-        clf   = row[17]  # R - Classificação Contratado
-        forn  = row[18]  # S - Fornecedor Contratado
-        custo = row[19]  # T - Custo Mensalidade Real
-        custo_inst = row[20]  # U - Custo Instalação Real
-        custo_24m  = row[21]  # V - Custo Total 24M
-        urb   = row[50]  # AY - Urbana ou Rural
-        fase  = row[0]   # A - Fase
-        muni  = row[2]   # C - Município
-        if uf and custo and isinstance(custo, (int, float)) and custo > 0:
-            clf_norm = str(clf or "").strip().title()
-            try:
-                vel_num = float(vel) if vel else 0
-            except:
-                vel_num = 0
-            if vel_num <= 50:     vel_faixa = "≤50 Mbps"
-            elif vel_num <= 100:  vel_faixa = "51-100 Mbps"
-            elif vel_num <= 200:  vel_faixa = "101-200 Mbps"
-            elif vel_num <= 500:  vel_faixa = "201-500 Mbps"
-            else:                 vel_faixa = ">500 Mbps"
-            rows.append({
-                "fase":         str(fase or "").strip(),
-                "uf":           str(uf).strip(),
-                "municipio":    str(muni or "").strip(),
-                "velocidade":   vel_num,
-                "vel_faixa":    vel_faixa,
-                "classificacao": clf_norm,
-                "fornecedor":   str(forn or "").strip(),
-                "mensalidade":  float(custo),
-                "instalacao":   float(custo_inst) if isinstance(custo_inst, (int, float)) else 0,
-                "custo_24m":    float(custo_24m)  if isinstance(custo_24m,  (int, float)) else 0,
-                "localizacao":  str(urb or "").strip().upper() or "NÃO INFORMADO",
-            })
-    wb.close()
-    return pd.DataFrame(rows)
-
 @st.cache_data(ttl=3600)
-def carregar_dados_re_excel():
-    return _ler_re_excel_raw()
+def carregar_dados_re_supabase():
+    """Carrega dados de análise RE do Supabase (financeiro_inep)."""
+    cols = "inep,uf,municipio,fase,custo_mensal_re_real,custo_inst_re_real,custo_24m_re_real,classificacao_re,fornecedor_re,velocidade_re,localizacao_re"
+    rows_all, offset = [], 0
+    while True:
+        r = sb.table("financeiro_inep").select(cols).range(offset, offset + 999).execute()
+        rows_all.extend(r.data)
+        if len(r.data) < 1000: break
+        offset += 1000
+    rows = []
+    for rec in rows_all:
+        custo = rec.get("custo_mensal_re_real")
+        uf    = rec.get("uf")
+        if not uf or not custo or not isinstance(custo, (int, float)) or custo <= 0:
+            continue
+        vel_num = rec.get("velocidade_re") or 0
+        try: vel_num = float(vel_num)
+        except: vel_num = 0
+        if vel_num <= 50:     vel_faixa = "≤50 Mbps"
+        elif vel_num <= 100:  vel_faixa = "51-100 Mbps"
+        elif vel_num <= 200:  vel_faixa = "101-200 Mbps"
+        elif vel_num <= 500:  vel_faixa = "201-500 Mbps"
+        else:                 vel_faixa = ">500 Mbps"
+        clf = str(rec.get("classificacao_re") or "").strip().title() or "Não informado"
+        loc = str(rec.get("localizacao_re") or "").strip().upper() or "NÃO INFORMADO"
+        rows.append({
+            "fase":         str(rec.get("fase") or "").strip(),
+            "uf":           str(uf).strip(),
+            "municipio":    str(rec.get("municipio") or "").strip(),
+            "velocidade":   vel_num,
+            "vel_faixa":    vel_faixa,
+            "classificacao": clf,
+            "fornecedor":   str(rec.get("fornecedor_re") or "").strip(),
+            "mensalidade":  float(custo),
+            "instalacao":   float(rec.get("custo_inst_re_real") or 0),
+            "custo_24m":    float(rec.get("custo_24m_re_real") or 0),
+            "localizacao":  loc,
+        })
+    return pd.DataFrame(rows)
 
 @st.cache_data(ttl=600)
 def carregar_financeiro():
@@ -676,16 +669,7 @@ with tab_re:
     st.markdown("### 📊 Análise de Custos de Mensalidade RE — GERAL COMPRA 4.2")
     st.caption("Base: Custo Mensalidade Real (Coluna T) · Fase 4.2 · Fonte: PLANILHA GERAL DE COMPRAS")
 
-    try:
-        df_re = carregar_dados_re_excel()
-        if df_re.empty:
-            carregar_dados_re_excel.clear()
-            df_re = _ler_re_excel_raw()
-    except Exception as _e_re:
-        import traceback as _tb
-        st.error(f"Erro ao carregar planilha RE: {_e_re}")
-        st.code(_tb.format_exc())
-        df_re = pd.DataFrame()
+    df_re = carregar_dados_re_supabase()
 
     if df_re.empty:
         st.warning("Planilha GERAL COMPRA 4.2 não encontrada ou sem dados.")
