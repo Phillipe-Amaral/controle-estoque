@@ -23,6 +23,8 @@ VERDE   = "#38A169"
 ROJO    = "#E53E3E"
 AZUL    = "#3182CE"
 
+EXCEL_RE_PATH = r"C:\Users\Usuário\OneDrive - IUH DIGITAL LTDA\Corporativo - 6.01 Compras_e_Contratações\Rede Externa\FASE 4.2 e 5.0- PLANILHA GERAL DE COMPRAS.xlsx"
+
 FASE_ORDER  = ["4.1", "4.2", "4.2 ADICIONAL", "5.0"]
 FASE_LABELS = {"4.1": "Fase 4.1", "4.2": "Fase 4.2", "4.2 ADICIONAL": "Fase 4.2 Ad.", "5.0": "Fase 5.0"}
 FASE_CORES  = {"4.1": TEAL, "4.2": ACCENT, "4.2 ADICIONAL": AZUL, "5.0": DARK}
@@ -65,6 +67,67 @@ def get_client():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 sb = get_client()
+
+@st.cache_data(ttl=3600)
+def carregar_dados_re_excel():
+    """Carrega GERAL COMPRA 4.2 do Excel para análise de custos de mensalidade."""
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(EXCEL_RE_PATH, data_only=True, read_only=True)
+        ws = wb["GERAL COMPRA 4.2"]
+        rows = []
+        for row in ws.iter_rows(min_row=3, values_only=True):
+            uf    = row[1]   # B
+            vel   = row[8]   # I - Veloc. Mbps Download
+            clf   = row[17]  # R - Classificação Contratado
+            forn  = row[18]  # S - Fornecedor Contratado
+            custo = row[19]  # T - Custo Mensalidade Real
+            custo_inst = row[20]  # U - Custo Instalação Real
+            custo_24m  = row[21]  # V - Custo Total 24M
+            urb   = row[50]  # AY - Urbana ou Rural
+            fase  = row[0]   # A - Fase
+            muni  = row[2]   # C - Município
+            if uf and custo and isinstance(custo, (int, float)) and custo > 0:
+                # Normalizar classificação
+                clf_norm = str(clf or "").strip().title()
+                if clf_norm.upper() in ("BROKER", "BROKER "):
+                    clf_norm = "Broker"
+                elif clf_norm.upper() in ("PROVEDOR", "PROVEDOR "):
+                    clf_norm = "Provedor"
+                elif clf_norm.upper() in ("OPERADORA",):
+                    clf_norm = "Operadora"
+                # Bucketing de velocidade
+                try:
+                    vel_num = float(vel) if vel else 0
+                except:
+                    vel_num = 0
+                if vel_num <= 50:
+                    vel_faixa = "≤50 Mbps"
+                elif vel_num <= 100:
+                    vel_faixa = "51-100 Mbps"
+                elif vel_num <= 200:
+                    vel_faixa = "101-200 Mbps"
+                elif vel_num <= 500:
+                    vel_faixa = "201-500 Mbps"
+                else:
+                    vel_faixa = ">500 Mbps"
+                rows.append({
+                    "fase":      str(fase or "").strip(),
+                    "uf":        str(uf).strip(),
+                    "municipio": str(muni or "").strip(),
+                    "velocidade": vel_num,
+                    "vel_faixa": vel_faixa,
+                    "classificacao": clf_norm,
+                    "fornecedor": str(forn or "").strip(),
+                    "mensalidade": float(custo),
+                    "instalacao":  float(custo_inst) if isinstance(custo_inst, (int, float)) else 0,
+                    "custo_24m":   float(custo_24m) if isinstance(custo_24m, (int, float)) else 0,
+                    "localizacao": str(urb or "").strip().upper() or "NÃO INFORMADO",
+                })
+        wb.close()
+        return pd.DataFrame(rows)
+    except Exception as e:
+        return pd.DataFrame()
 
 @st.cache_data(ttl=600)
 def carregar_financeiro():
@@ -617,3 +680,264 @@ with tab_log:
         base_layout(fig_r24, "Receita × Custo de RE 24 Meses (R$)", height=320)
         fig_r24.update_yaxes(tickformat=".2s", tickprefix="R$ ")
         st.plotly_chart(fig_r24, use_container_width=True)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 2 — continuação: ANÁLISE DE REDUÇÃO DE CUSTOS RE
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab_re:
+    st.markdown("---")
+    st.markdown("### 📊 Análise de Custos de Mensalidade RE — GERAL COMPRA 4.2")
+    st.caption("Base: Custo Mensalidade Real (Coluna T) · Fase 4.2 · Fonte: PLANILHA GERAL DE COMPRAS")
+
+    df_re = carregar_dados_re_excel()
+
+    if df_re.empty:
+        st.warning("Planilha GERAL COMPRA 4.2 não encontrada ou sem dados.")
+    else:
+        # ── Filtros específicos da análise RE ─────────────────────────────────
+        with st.expander("🔽 Filtros da análise", expanded=True):
+            fa1, fa2, fa3, fa4 = st.columns(4)
+            with fa1:
+                ufs_re_disp = sorted(df_re["uf"].unique())
+                ufs_re_sel  = st.multiselect("UF", ufs_re_disp, default=ufs_re_disp, key="re_uf")
+            with fa2:
+                clfs_disp = sorted(df_re[df_re["classificacao"] != ""]["classificacao"].unique())
+                clfs_sel  = st.multiselect("Classificação", clfs_disp, default=clfs_disp, key="re_clf")
+            with fa3:
+                locs_disp = sorted(df_re["localizacao"].unique())
+                locs_sel  = st.multiselect("Localização", locs_disp, default=locs_disp, key="re_loc")
+            with fa4:
+                VEL_ORDER = ["≤50 Mbps", "51-100 Mbps", "101-200 Mbps", "201-500 Mbps", ">500 Mbps"]
+                faixas_disp = [v for v in VEL_ORDER if v in df_re["vel_faixa"].unique()]
+                faixas_sel  = st.multiselect("Faixa de Velocidade", faixas_disp, default=faixas_disp, key="re_vel")
+
+        df_rf = df_re[
+            df_re["uf"].isin(ufs_re_sel) &
+            df_re["classificacao"].isin(clfs_sel) &
+            df_re["localizacao"].isin(locs_sel) &
+            df_re["vel_faixa"].isin(faixas_sel)
+        ].copy()
+
+        total_linhas = len(df_rf)
+        media_geral  = df_rf["mensalidade"].mean() if total_linhas > 0 else 0
+        mediana_geral = df_rf["mensalidade"].median() if total_linhas > 0 else 0
+
+        kre1, kre2, kre3, kre4 = st.columns(4)
+        kre1.metric("Contratos selecionados", f"{total_linhas:,}".replace(",", "."))
+        kre2.metric("Mensalidade Média", brl(media_geral))
+        kre3.metric("Mensalidade Mediana", brl(mediana_geral))
+        kre4.metric("Custo Total 24M", brl(df_rf["custo_24m"].sum(), milhoes=True))
+
+        st.markdown("---")
+
+        # ── ROW 1: Média por UF + Média por Classificação ────────────────────
+        r1c1, r1c2 = st.columns(2)
+
+        with r1c1:
+            df_uf = (
+                df_rf.groupby("uf")
+                .agg(media=("mensalidade", "mean"), count=("mensalidade", "count"))
+                .reset_index()
+                .sort_values("media", ascending=True)
+            )
+            fig_uf = go.Figure(go.Bar(
+                y=df_uf["uf"],
+                x=df_uf["media"],
+                orientation="h",
+                marker_color=[
+                    ROJO if v > media_geral * 1.1 else (VERDE if v < media_geral * 0.9 else TEAL)
+                    for v in df_uf["media"]
+                ],
+                text=[f"R$ {v:,.0f}  ({n} escolas)".replace(",", ".") for v, n in zip(df_uf["media"], df_uf["count"])],
+                textposition="outside",
+                textfont=dict(size=9),
+            ))
+            fig_uf.add_vline(x=media_geral, line_dash="dash", line_color=SLATE,
+                             annotation_text=f"Média geral: {brl(media_geral)}",
+                             annotation_position="top right",
+                             annotation_font_size=9)
+            base_layout(fig_uf, "Mensalidade Média por UF (R$)", height=max(380, len(df_uf)*24+60), showlegend=False)
+            fig_uf.update_xaxes(tickprefix="R$ ", showgrid=True)
+            fig_uf.update_yaxes(showgrid=False)
+            st.plotly_chart(fig_uf, use_container_width=True)
+
+        with r1c2:
+            df_clf = (
+                df_rf[df_rf["classificacao"] != ""]
+                .groupby("classificacao")
+                .agg(media=("mensalidade", "mean"), count=("mensalidade", "count"))
+                .reset_index()
+                .sort_values("media", ascending=False)
+            )
+            CORES_CLF = {"Broker": TEAL, "Provedor": ACCENT, "Operadora": AZUL}
+            fig_clf = go.Figure(go.Bar(
+                x=df_clf["classificacao"],
+                y=df_clf["media"],
+                marker_color=[CORES_CLF.get(c, SLATE) for c in df_clf["classificacao"]],
+                text=[f"R$ {v:,.0f}<br>({n} contratos)".replace(",", ".") for v, n in zip(df_clf["media"], df_clf["count"])],
+                textposition="outside",
+                textfont=dict(size=11),
+            ))
+            fig_clf.add_hline(y=media_geral, line_dash="dash", line_color=SLATE,
+                              annotation_text=f"Média geral: {brl(media_geral)}",
+                              annotation_position="top right", annotation_font_size=9)
+            base_layout(fig_clf, "Mensalidade Média por Classificação do Fornecedor (R$)",
+                        height=380, showlegend=False)
+            fig_clf.update_yaxes(tickprefix="R$ ")
+            st.plotly_chart(fig_clf, use_container_width=True)
+
+        # ── ROW 2: Média por Velocidade + Média por Localização ───────────────
+        r2c1, r2c2 = st.columns(2)
+
+        with r2c1:
+            df_vel = (
+                df_rf.groupby("vel_faixa")
+                .agg(media=("mensalidade", "mean"), count=("mensalidade", "count"),
+                     mediana=("mensalidade", "median"))
+                .reset_index()
+            )
+            df_vel["ordem"] = df_vel["vel_faixa"].map(
+                {v: i for i, v in enumerate(VEL_ORDER)})
+            df_vel = df_vel.sort_values("ordem")
+
+            fig_vel = go.Figure()
+            fig_vel.add_bar(
+                name="Média",
+                x=df_vel["vel_faixa"],
+                y=df_vel["media"],
+                marker_color=TEAL,
+                text=[f"R$ {v:,.0f}".replace(",", ".") for v in df_vel["media"]],
+                textposition="outside",
+                textfont=dict(size=10),
+            )
+            fig_vel.add_scatter(
+                name="Mediana",
+                x=df_vel["vel_faixa"],
+                y=df_vel["mediana"],
+                mode="markers+lines",
+                marker=dict(size=10, color=ACCENT, line=dict(width=2, color="white")),
+                line=dict(color=ACCENT, width=2, dash="dot"),
+            )
+            # Anotação com nº de contratos
+            for _, row_v in df_vel.iterrows():
+                fig_vel.add_annotation(
+                    x=row_v["vel_faixa"], y=0,
+                    text=f"{row_v['count']} contratos",
+                    showarrow=False,
+                    font=dict(size=8, color=SLATE),
+                    yshift=-18, xanchor="center",
+                )
+            base_layout(fig_vel, "Mensalidade Média e Mediana por Faixa de Velocidade (R$)", height=380)
+            fig_vel.update_yaxes(tickprefix="R$ ")
+            st.plotly_chart(fig_vel, use_container_width=True)
+
+        with r2c2:
+            df_loc = (
+                df_rf[df_rf["localizacao"].isin(["RURAL", "URBANA"])]
+                .groupby("localizacao")
+                .agg(media=("mensalidade", "mean"), count=("mensalidade", "count"),
+                     total_24m=("custo_24m", "sum"))
+                .reset_index()
+            )
+            CORES_LOC = {"RURAL": "#D97706", "URBANA": AZUL}
+            fig_loc = go.Figure(go.Bar(
+                x=df_loc["localizacao"],
+                y=df_loc["media"],
+                marker_color=[CORES_LOC.get(l, SLATE) for l in df_loc["localizacao"]],
+                text=[f"R$ {v:,.0f}<br>({n} escolas)".replace(",", ".") for v, n in zip(df_loc["media"], df_loc["count"])],
+                textposition="outside",
+                textfont=dict(size=12),
+            ))
+            if len(df_loc) == 2:
+                v_rural = df_loc[df_loc["localizacao"] == "RURAL"]["media"].values
+                v_urban = df_loc[df_loc["localizacao"] == "URBANA"]["media"].values
+                if len(v_rural) and len(v_urban):
+                    premium = (v_rural[0] - v_urban[0]) / v_urban[0] * 100
+                    fig_loc.add_annotation(
+                        text=f"Premium Rural: +{premium:.1f}%" if premium > 0 else f"Rural: {premium:.1f}% vs Urbana",
+                        xref="paper", yref="paper", x=0.5, y=1.12,
+                        showarrow=False,
+                        font=dict(size=12, color="#D97706" if premium > 0 else VERDE, family="Segoe UI"),
+                        xanchor="center",
+                    )
+            base_layout(fig_loc, "Mensalidade Média por Localização (R$)", height=380, showlegend=False)
+            fig_loc.update_yaxes(tickprefix="R$ ")
+            st.plotly_chart(fig_loc, use_container_width=True)
+
+        # ── ROW 3: Cruzamento Velocidade × Localização (premium rural por banda) ──
+        st.markdown("#### Custo médio por banda e localização — rural vs. urbana")
+        st.caption("Mostra se o alegado sobre-custo rural é consistente em todas as velocidades.")
+
+        df_cross = (
+            df_rf[df_rf["localizacao"].isin(["RURAL", "URBANA"])]
+            .groupby(["vel_faixa", "localizacao"])
+            .agg(media=("mensalidade", "mean"), count=("mensalidade", "count"))
+            .reset_index()
+        )
+        df_cross["ordem"] = df_cross["vel_faixa"].map({v: i for i, v in enumerate(VEL_ORDER)})
+        df_cross = df_cross.sort_values("ordem")
+
+        fig_cross = go.Figure()
+        for loc, cor in [("RURAL", "#D97706"), ("URBANA", AZUL)]:
+            sub = df_cross[df_cross["localizacao"] == loc]
+            fig_cross.add_bar(
+                name=loc.title(),
+                x=sub["vel_faixa"],
+                y=sub["media"],
+                marker_color=cor,
+                text=[f"R$ {v:,.0f}".replace(",", ".") for v in sub["media"]],
+                textposition="outside",
+                textfont=dict(size=9),
+            )
+        fig_cross.update_layout(barmode="group")
+        base_layout(fig_cross, "Mensalidade Média: Rural vs. Urbana por Faixa de Velocidade", height=360)
+        fig_cross.update_yaxes(tickprefix="R$ ")
+        st.plotly_chart(fig_cross, use_container_width=True)
+
+        # ── ROW 4: Custo por Classificação × Velocidade ─────────────────────
+        st.markdown("#### Custo médio por fornecedor × velocidade")
+        df_clf_vel = (
+            df_rf[df_rf["classificacao"] != ""]
+            .groupby(["vel_faixa", "classificacao"])
+            .agg(media=("mensalidade", "mean"), count=("mensalidade", "count"))
+            .reset_index()
+        )
+        df_clf_vel["ordem"] = df_clf_vel["vel_faixa"].map({v: i for i, v in enumerate(VEL_ORDER)})
+        df_clf_vel = df_clf_vel.sort_values("ordem")
+
+        fig_cv = go.Figure()
+        for cls, cor in [("Broker", TEAL), ("Provedor", ACCENT), ("Operadora", AZUL)]:
+            sub = df_clf_vel[df_clf_vel["classificacao"] == cls]
+            if not sub.empty:
+                fig_cv.add_bar(
+                    name=cls,
+                    x=sub["vel_faixa"],
+                    y=sub["media"],
+                    marker_color=cor,
+                    text=[f"R$ {v:,.0f}".replace(",", ".") for v in sub["media"]],
+                    textposition="outside",
+                    textfont=dict(size=9),
+                )
+        fig_cv.update_layout(barmode="group")
+        base_layout(fig_cv, "Mensalidade Média por Classificação × Faixa de Velocidade", height=360)
+        fig_cv.update_yaxes(tickprefix="R$ ")
+        st.plotly_chart(fig_cv, use_container_width=True)
+
+        # ── Exportar dados detalhados ──────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("**Exportar dados filtrados:**")
+
+        df_export = df_rf[["fase","uf","municipio","velocidade","vel_faixa","classificacao",
+                            "fornecedor","mensalidade","instalacao","custo_24m","localizacao"]].copy()
+        df_export.columns = ["Fase","UF","Município","Velocidade (Mbps)","Faixa Velocidade",
+                              "Classificação","Fornecedor","Mensalidade Real (R$)",
+                              "Instalação Real (R$)","Custo 24M (R$)","Localização"]
+
+        csv_re = df_export.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "⬇️ Exportar análise de custos RE (.csv)",
+            data=csv_re,
+            file_name="analise_custos_RE_mensalidade.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
