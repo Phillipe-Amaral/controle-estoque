@@ -874,10 +874,13 @@ with tab_re:
         fig_cross.update_yaxes(tickprefix="R$ ")
         st.plotly_chart(fig_cross, use_container_width=True)
 
-        # ── ROW 4: Custo por Classificação × Velocidade ─────────────────────
+        # ── ROW 4: Custo por Classificação × Velocidade (barras) + linhas Urbano/Rural ──
         st.markdown("#### Custo médio por fornecedor × velocidade")
+        st.caption("Barras = média geral · Linhas = média Urbana e Rural por classificação")
+
+        df_clf_vel_base = df_rf[df_rf["classificacao"] != ""].copy()
         df_clf_vel = (
-            df_rf[df_rf["classificacao"] != ""]
+            df_clf_vel_base
             .groupby(["vel_faixa", "classificacao"])
             .agg(media=("mensalidade", "mean"), count=("mensalidade", "count"))
             .reset_index()
@@ -885,7 +888,23 @@ with tab_re:
         df_clf_vel["ordem"] = df_clf_vel["vel_faixa"].map({v: i for i, v in enumerate(VEL_ORDER)})
         df_clf_vel = df_clf_vel.sort_values("ordem")
 
+        # Médias por classificação × velocidade × localização (para as linhas)
+        df_clf_vel_loc = (
+            df_clf_vel_base[df_clf_vel_base["localizacao"].isin(["RURAL", "URBANA"])]
+            .groupby(["vel_faixa", "classificacao", "localizacao"])
+            .agg(media=("mensalidade", "mean"))
+            .reset_index()
+        )
+        df_clf_vel_loc["ordem"] = df_clf_vel_loc["vel_faixa"].map({v: i for i, v in enumerate(VEL_ORDER)})
+        df_clf_vel_loc = df_clf_vel_loc.sort_values(["classificacao", "ordem"])
+
+        CORES_CLF_CV = {"Broker": TEAL, "Provedor": ACCENT, "Operadora": AZUL}
+        DASH_LOC = {"URBANA": "dash", "RURAL": "dot"}
+        MARKER_LOC = {"URBANA": "circle", "RURAL": "diamond"}
+
         fig_cv = go.Figure()
+
+        # Barras (média geral por classificação × velocidade)
         for cls, cor in [("Broker", TEAL), ("Provedor", ACCENT), ("Operadora", AZUL)]:
             sub = df_clf_vel[df_clf_vel["classificacao"] == cls]
             if not sub.empty:
@@ -894,13 +913,41 @@ with tab_re:
                     x=sub["vel_faixa"],
                     y=sub["media"],
                     marker_color=cor,
+                    opacity=0.75,
                     text=[f"R$ {v:,.0f}".replace(",", ".") for v in sub["media"]],
                     textposition="outside",
                     textfont=dict(size=9),
+                    legendgroup=cls,
                 )
+
+        # Linhas (Urbana e Rural) por classificação
+        for cls, cor in [("Broker", TEAL), ("Provedor", ACCENT), ("Operadora", AZUL)]:
+            for loc in ["URBANA", "RURAL"]:
+                sub = df_clf_vel_loc[
+                    (df_clf_vel_loc["classificacao"] == cls) &
+                    (df_clf_vel_loc["localizacao"] == loc)
+                ].sort_values("ordem")
+                if sub.empty:
+                    continue
+                fig_cv.add_scatter(
+                    name=f"{cls} {loc.title()}",
+                    x=sub["vel_faixa"],
+                    y=sub["media"],
+                    mode="lines+markers",
+                    line=dict(color=cor, width=2, dash=DASH_LOC[loc]),
+                    marker=dict(symbol=MARKER_LOC[loc], size=9, color=cor,
+                                line=dict(width=1.5, color="white")),
+                    legendgroup=cls,
+                    showlegend=True,
+                )
+
         fig_cv.update_layout(barmode="group")
-        base_layout(fig_cv, "Mensalidade Média por Classificação × Faixa de Velocidade", height=360)
+        base_layout(fig_cv, "Mensalidade Média por Classificação × Faixa de Velocidade", height=420)
         fig_cv.update_yaxes(tickprefix="R$ ")
+        fig_cv.update_layout(legend=dict(
+            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+            font=dict(size=9),
+        ))
         st.plotly_chart(fig_cv, use_container_width=True)
 
         # ── Exportar dados detalhados ──────────────────────────────────────────
