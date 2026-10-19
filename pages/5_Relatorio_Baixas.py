@@ -1,3 +1,4 @@
+import io
 import re
 import streamlit as st
 import plotly.express as px
@@ -88,12 +89,15 @@ def carregar_baixas():
         df_comp["valor_unitario"] = pd.to_numeric(df_comp["valor_unitario"], errors="coerce")
         df_comp["qtd_recebida"]   = pd.to_numeric(df_comp["qtd_recebida"],   errors="coerce").fillna(0)
         df_comp = df_comp[df_comp["valor_unitario"].notna() & (df_comp["valor_unitario"] > 0)]
-        df_comp["valor_total_linha"] = df_comp["valor_unitario"] * df_comp["qtd_recebida"]
-        df_preco = (df_comp.groupby(["parceiro_id", "item_id"])
-                           .apply(lambda g: g["valor_total_linha"].sum() / g["qtd_recebida"].sum()
-                                  if g["qtd_recebida"].sum() > 0
-                                  else g["valor_unitario"].mean(), include_groups=False)
-                           .reset_index(name="valor_unitario"))
+        df_comp["_vt"] = df_comp["valor_unitario"] * df_comp["qtd_recebida"]
+        agg = df_comp.groupby(["parceiro_id", "item_id"]).agg(
+            _soma_vt=("_vt", "sum"),
+            _soma_q=("qtd_recebida", "sum"),
+        ).reset_index()
+        agg["valor_unitario"] = agg.apply(
+            lambda r: r["_soma_vt"] / r["_soma_q"] if r["_soma_q"] > 0 else None, axis=1
+        )
+        df_preco = agg[["parceiro_id", "item_id", "valor_unitario"]]
     else:
         df_preco = pd.DataFrame(columns=["parceiro_id", "item_id", "valor_unitario"])
 
@@ -196,11 +200,13 @@ with tab1:
         }
     )
 
+    buf = io.BytesIO()
+    df[cols_display].to_excel(buf, index=False, sheet_name="Baixas")
     st.download_button(
-        "⬇️ Exportar (.csv)",
-        data=df[cols_display].to_csv(index=False).encode("utf-8"),
-        file_name="relatorio_baixas.csv",
-        mime="text/csv",
+        "⬇️ Exportar (.xlsx)",
+        data=buf.getvalue(),
+        file_name="relatorio_baixas.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
 # ══════════════════════════════════════════════════════════════════════════════
