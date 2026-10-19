@@ -76,7 +76,7 @@ def carregar_baixas():
     r_ei   = fetch_all("execucao_itens", "execucao_id, item_id, qtd")
     r_parc = sb.table("parceiros").select("id, nome").execute().data
     r_item = sb.table("itens").select("id, nome").execute().data
-    r_comp = fetch_all("compras", "parceiro_id, item_id, qtd_recebida, valor_unitario")
+    r_comp = fetch_all("compras", "parceiro_id, item_id, qtd_recebida, valor_unitario, fase, uf")
 
     df_exec = pd.DataFrame(r_exec)
     df_ei   = pd.DataFrame(r_ei)
@@ -84,9 +84,10 @@ def carregar_baixas():
     df_item = pd.DataFrame(r_item).rename(columns={"id": "item_id", "nome": "item"})
     df_comp = pd.DataFrame(r_comp)
 
-    # Preço médio ponderado — 2 níveis de fallback:
-    # 1. por (parceiro_id, item_id)  →  exato
-    # 2. por item_id apenas          →  quando o parceiro não tem compra registrada
+    # Preço médio ponderado — 3 níveis de fallback:
+    # 1. por (parceiro_id, item_id)    → exato por parceiro
+    # 2. por (item_id, fase, uf)       → média do item na mesma fase e estado
+    # 3. por item_id apenas            → média global do item
     if not df_comp.empty and "valor_unitario" in df_comp.columns:
         df_comp["valor_unitario"] = pd.to_numeric(df_comp["valor_unitario"], errors="coerce")
         df_comp["qtd_recebida"]   = pd.to_numeric(df_comp["qtd_recebida"],   errors="coerce").fillna(0)
@@ -102,28 +103,41 @@ def carregar_baixas():
         )
         df_preco_parc = agg1[["parceiro_id", "item_id", "valor_unitario"]]
 
-        # Nível 2: média por item (todos os parceiros)
-        agg2 = df_comp.groupby("item_id").agg(
+        # Nível 2: média por item + fase + uf
+        agg2 = df_comp.groupby(["item_id", "fase", "uf"]).agg(
             _sv=("_vt", "sum"), _sq=("qtd_recebida", "sum")
         ).reset_index()
-        agg2["valor_unitario_item"] = agg2.apply(
+        agg2["valor_fase_uf"] = agg2.apply(
             lambda r: r["_sv"] / r["_sq"] if r["_sq"] > 0 else None, axis=1
         )
-        df_preco_item = agg2[["item_id", "valor_unitario_item"]]
+        df_preco_fase_uf = agg2[["item_id", "fase", "uf", "valor_fase_uf"]]
+
+        # Nível 3: média global por item
+        agg3 = df_comp.groupby("item_id").agg(
+            _sv=("_vt", "sum"), _sq=("qtd_recebida", "sum")
+        ).reset_index()
+        agg3["valor_unitario_item"] = agg3.apply(
+            lambda r: r["_sv"] / r["_sq"] if r["_sq"] > 0 else None, axis=1
+        )
+        df_preco_item = agg3[["item_id", "valor_unitario_item"]]
     else:
-        df_preco_parc = pd.DataFrame(columns=["parceiro_id", "item_id", "valor_unitario"])
-        df_preco_item = pd.DataFrame(columns=["item_id", "valor_unitario_item"])
+        df_preco_parc    = pd.DataFrame(columns=["parceiro_id", "item_id", "valor_unitario"])
+        df_preco_fase_uf = pd.DataFrame(columns=["item_id", "fase", "uf", "valor_fase_uf"])
+        df_preco_item    = pd.DataFrame(columns=["item_id", "valor_unitario_item"])
 
     df = (df_ei
           .merge(df_exec, left_on="execucao_id", right_on="id")
           .merge(df_parc, on="parceiro_id")
           .merge(df_item, on="item_id")
           .merge(df_preco_parc, on=["parceiro_id", "item_id"], how="left")
+          .merge(df_preco_fase_uf, on=["item_id", "fase", "uf"], how="left")
           .merge(df_preco_item, on="item_id", how="left"))
 
-    # Aplica fallback: usa preço do parceiro quando disponível, senão preço do item
-    df["valor_unitario"] = df["valor_unitario"].fillna(df["valor_unitario_item"])
-    df.drop(columns=["valor_unitario_item"], inplace=True)
+    # Aplica fallback em cascata
+    df["valor_unitario"] = (df["valor_unitario"]
+                            .fillna(df["valor_fase_uf"])
+                            .fillna(df["valor_unitario_item"]))
+    df.drop(columns=["valor_fase_uf", "valor_unitario_item"], inplace=True)
 
     df["Função"] = df["item"].apply(get_funcao)
 
