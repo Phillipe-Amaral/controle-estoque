@@ -75,22 +75,40 @@ def carregar_baixas():
     r_ei   = fetch_all("execucao_itens", "execucao_id, item_id, qtd")
     r_parc = sb.table("parceiros").select("id, nome").execute().data
     r_item = sb.table("itens").select("id, nome").execute().data
+    r_comp = fetch_all("compras", "parceiro_id, item_id, qtd_recebida, valor_unitario")
 
     df_exec = pd.DataFrame(r_exec)
     df_ei   = pd.DataFrame(r_ei)
     df_parc = pd.DataFrame(r_parc).rename(columns={"id": "parceiro_id", "nome": "parceiro"})
     df_item = pd.DataFrame(r_item).rename(columns={"id": "item_id", "nome": "item"})
+    df_comp = pd.DataFrame(r_comp)
+
+    # Preço médio ponderado por (parceiro_id, item_id) — ignora registros sem valor
+    if not df_comp.empty and "valor_unitario" in df_comp.columns:
+        df_comp["valor_unitario"] = pd.to_numeric(df_comp["valor_unitario"], errors="coerce")
+        df_comp["qtd_recebida"]   = pd.to_numeric(df_comp["qtd_recebida"],   errors="coerce").fillna(0)
+        df_comp = df_comp[df_comp["valor_unitario"].notna() & (df_comp["valor_unitario"] > 0)]
+        df_comp["valor_total_linha"] = df_comp["valor_unitario"] * df_comp["qtd_recebida"]
+        df_preco = (df_comp.groupby(["parceiro_id", "item_id"])
+                           .apply(lambda g: g["valor_total_linha"].sum() / g["qtd_recebida"].sum()
+                                  if g["qtd_recebida"].sum() > 0
+                                  else g["valor_unitario"].mean(), include_groups=False)
+                           .reset_index(name="valor_unitario"))
+    else:
+        df_preco = pd.DataFrame(columns=["parceiro_id", "item_id", "valor_unitario"])
 
     df = (df_ei
           .merge(df_exec, left_on="execucao_id", right_on="id")
           .merge(df_parc, on="parceiro_id")
-          .merge(df_item, on="item_id"))
+          .merge(df_item, on="item_id")
+          .merge(df_preco, on=["parceiro_id", "item_id"], how="left"))
 
     df["Função"] = df["item"].apply(get_funcao)
 
     df = df[[
         "parceiro", "fase", "uf", "municipio",
-        "nome_escola", "codigo_inep", "kit", "Função", "item", "qtd", "data_implantacao"
+        "nome_escola", "codigo_inep", "kit", "Função", "item", "qtd",
+        "valor_unitario", "data_implantacao"
     ]].rename(columns={
         "parceiro":        "Parceiro",
         "fase":            "Fase",
@@ -101,11 +119,14 @@ def carregar_baixas():
         "kit":             "Kit",
         "item":            "Item",
         "qtd":             "Qtd Baixada",
+        "valor_unitario":  "Vlr Unit (R$)",
         "data_implantacao":"Data",
     })
 
-    df["Qtd Baixada"] = pd.to_numeric(df["Qtd Baixada"], errors="coerce").fillna(0)
-    df["kit_num"]     = df["Kit"].apply(parse_kit_num)
+    df["Qtd Baixada"]   = pd.to_numeric(df["Qtd Baixada"],   errors="coerce").fillna(0)
+    df["Vlr Unit (R$)"] = pd.to_numeric(df["Vlr Unit (R$)"], errors="coerce")
+    df["Vlr Total (R$)"] = df["Vlr Unit (R$)"] * df["Qtd Baixada"]
+    df["kit_num"]       = df["Kit"].apply(parse_kit_num)
     return df
 
 page_header("📋 Relatório de Baixas por Escola",
@@ -160,8 +181,20 @@ tab1, tab2, tab3 = st.tabs([
 
 # ══════════════════════════════════════════════════════════════════════════════
 with tab1:
-    cols_display = ["Parceiro","Fase","UF","Município","Escola","INEP","Kit","Função","Item","Qtd Baixada","Data"]
-    st.dataframe(df[cols_display], use_container_width=True, hide_index=True, height=480)
+    cols_display = [
+        "Parceiro","Fase","UF","Município","Escola","INEP","Kit","Função","Item",
+        "Qtd Baixada","Vlr Unit (R$)","Vlr Total (R$)","Data"
+    ]
+    st.dataframe(
+        df[cols_display],
+        use_container_width=True,
+        hide_index=True,
+        height=480,
+        column_config={
+            "Vlr Unit (R$)":  st.column_config.NumberColumn("Vlr Unit (R$)",  format="R$ %.2f"),
+            "Vlr Total (R$)": st.column_config.NumberColumn("Vlr Total (R$)", format="R$ %.2f"),
+        }
+    )
 
     st.download_button(
         "⬇️ Exportar (.csv)",
