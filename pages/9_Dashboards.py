@@ -129,12 +129,28 @@ def carregar_dados_re_supabase():
         })
     return pd.DataFrame(rows)
 
+# Colunas usadas pelo dashboard — evitar select("*") que causa RemoteProtocolError
+_COLS_FINANCEIRO = ",".join([
+    "inep", "fase", "uf", "municipio",
+    "data_inst_ri", "data_inst_re", "data_rdo",
+    "aps_ad_impl",
+    "receita_parcial", "custo_parcial", "margem_parcial",
+    "classificacao_re", "fornecedor_re", "localizacao_re",
+    "custo_mensal_re_orc", "custo_mensal_re_real",
+    "custo_inst_re_orc",  "custo_inst_re_real",
+    "custo_24m_re_orc",   "custo_24m_re_real",
+    "rec_serv_ri_real", "rec_equip_ri_real",
+    "custo_serv_ri", "custo_equip_cmv",
+    "rec_mens_re_24m",
+    "velocidade_re",
+])
+
 @st.cache_data(ttl=600)
 def carregar_financeiro():
     rows, page, size = [], 0, 1000
     while True:
         r = (sb.table("financeiro_inep")
-               .select("*")
+               .select(_COLS_FINANCEIRO)
                .range(page * size, (page + 1) * size - 1)
                .execute())
         if not r.data:
@@ -142,15 +158,11 @@ def carregar_financeiro():
         rows.extend(r.data)
         page += 1
     df = pd.DataFrame(rows)
-    num_skip = {
-        "inep", "escola", "uf", "municipio", "fase", "lote",
-        "parceiro_ri", "responsavel_re", "fornecedor_re", "classificacao_re",
-        "status_circuito_re", "kit_previsto", "kit_real",
-        "status_parcial", "status_rdo", "updated_at",
-        "data_inst_ri", "data_manut_ri", "data_inst_re", "data_rdo",
-    }
+    str_cols = {"inep", "uf", "municipio", "fase",
+                "classificacao_re", "fornecedor_re", "localizacao_re",
+                "data_inst_ri", "data_inst_re", "data_rdo"}
     for c in df.columns:
-        if c not in num_skip:
+        if c not in str_cols:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
     df["fase"] = df["fase"].fillna("").str.strip()
     for col in ["data_inst_ri", "data_inst_re", "data_rdo"]:
