@@ -29,13 +29,7 @@ FASE_ORDER  = ["4.1", "4.2", "4.2 ADICIONAL", "5.0"]
 FASE_LABELS = {"4.1": "Fase 4.1", "4.2": "Fase 4.2", "4.2 ADICIONAL": "Fase 4.2 Ad.", "5.0": "Fase 5.0"}
 FASE_CORES  = {"4.1": TEAL, "4.2": ACCENT, "4.2 ADICIONAL": AZUL, "5.0": DARK}
 
-# ── Dados estáticos (TABELA FINANCEIRA — última atualização 17/08/2026) ────────
-ESTOQUE = {
-    "Fase 4.1":   10_067_880,
-    "Fase 4.2":    5_900_127,
-    "Fase 4.2 Ad.":  442_048,
-    "Fase 5.0":   15_484_285,
-}
+# ESTOQUE calculado dinamicamente via compras (atualizado automaticamente)
 
 # Scatter: média de AP's instalados × cabo consumido por AP (m)
 SCATTER = {
@@ -67,6 +61,32 @@ def get_client():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 sb = get_client()
+
+FASE_ALIAS = {"4.2 Adicional": "4.2 ADICIONAL", "4.2 adicional": "4.2 ADICIONAL"}
+FASE_TO_LABEL = {"4.1": "Fase 4.1", "4.2": "Fase 4.2", "4.2 ADICIONAL": "Fase 4.2 Ad.", "5.0": "Fase 5.0"}
+
+@st.cache_data(ttl=600)
+def carregar_estoque_ri():
+    """Calcula investimento total em RI por fase (compras recebidas × valor unitário)."""
+    rows, offset = [], 0
+    while True:
+        r = sb.table("compras").select("fase,qtd_recebida,valor_unitario").range(offset, offset+999).execute()
+        rows.extend(r.data)
+        if len(r.data) < 1000: break
+        offset += 1000
+    result = {}
+    for rec in rows:
+        fase = str(rec.get("fase") or "").strip()
+        fase = FASE_ALIAS.get(fase, fase)
+        label = FASE_TO_LABEL.get(fase)
+        if not label: continue
+        try:
+            qtd = float(rec.get("qtd_recebida") or 0)
+            vu  = float(rec.get("valor_unitario") or 0)
+            if qtd > 0 and vu > 0:
+                result[label] = result.get(label, 0) + qtd * vu
+        except: pass
+    return result
 
 @st.cache_data(ttl=3600)
 def carregar_dados_re_supabase():
@@ -254,10 +274,13 @@ with tab_geral:
 
     # ── Investimento em Estoque RI por Fase ───────────────────────────────────
     with col_b:
-        fases_est = [k for k in ["Fase 4.1", "Fase 4.2", "Fase 4.2 Ad.", "Fase 5.0"]
-                     if any(f in k for f in fases_sel)]
-        vals_est  = [ESTOQUE[k] for k in fases_est]
-        cores_est = [list(FASE_CORES.values())[i] for i in range(len(fases_est))]
+        estoque_ri = carregar_estoque_ri()
+        label_order = ["Fase 4.1", "Fase 4.2", "Fase 4.2 Ad.", "Fase 5.0"]
+        fase_sel_labels = {FASE_TO_LABEL.get(f, f) for f in fases_sel}
+        fase_sel_labels.add("Fase 4.2 Ad.") if "4.2 ADICIONAL" in fases_sel else None
+        fases_est = [k for k in label_order if k in estoque_ri and k in fase_sel_labels]
+        vals_est  = [estoque_ri[k] for k in fases_est]
+        cores_est = [list(FASE_CORES.values())[label_order.index(k)] for k in fases_est]
 
         fig_est = go.Figure(go.Bar(
             x=fases_est,
@@ -270,7 +293,7 @@ with tab_geral:
         base_layout(fig_est, "Investimento em Estoque de RI por Fase", height=340, showlegend=False)
         fig_est.update_yaxes(tickformat=".2s", tickprefix="R$ ")
         fig_est.add_annotation(
-            text="Fonte: TABELA FINANCEIRA · 17/08/2026",
+            text="Fonte: compras recebidas × valor unitário · atualizado em tempo real",
             xref="paper", yref="paper", x=1, y=-0.08,
             showarrow=False, font=dict(size=9, color=SLATE), xanchor="right",
         )
