@@ -88,10 +88,27 @@ def carregar_baixas():
     # 1. por (parceiro_id, item_id)    → exato por parceiro
     # 2. por (item_id, fase, uf)       → média do item na mesma fase e estado
     # 3. por item_id apenas            → média global do item
+    #
+    # CABO: compras registradas por bobina de 305m → converter para preço/metro antes
+    METROS_POR_BOBINA = 305.0
     if not df_comp.empty and "valor_unitario" in df_comp.columns:
         df_comp["valor_unitario"] = pd.to_numeric(df_comp["valor_unitario"], errors="coerce")
         df_comp["qtd_recebida"]   = pd.to_numeric(df_comp["qtd_recebida"],   errors="coerce").fillna(0)
         df_comp = df_comp[df_comp["valor_unitario"].notna() & (df_comp["valor_unitario"] > 0)]
+
+        # Converte CABO de preço/bobina → preço/metro
+        # qtd_recebida em bobinas × 305 = metros; valor_unitario ÷ 305 = R$/metro
+        cabo_item_ids = set(
+            df_item[df_item["item"].str.upper().str.contains("CABO", na=False)]["item_id"].tolist()
+        )
+        cabo_mask_comp = df_comp["item_id"].isin(cabo_item_ids)
+        df_comp.loc[cabo_mask_comp, "valor_unitario"] = (
+            df_comp.loc[cabo_mask_comp, "valor_unitario"] / METROS_POR_BOBINA
+        )
+        df_comp.loc[cabo_mask_comp, "qtd_recebida"] = (
+            df_comp.loc[cabo_mask_comp, "qtd_recebida"] * METROS_POR_BOBINA
+        )
+
         df_comp["_vt"] = df_comp["valor_unitario"] * df_comp["qtd_recebida"]
 
         # Nível 1: por parceiro + item
@@ -161,12 +178,6 @@ def carregar_baixas():
 
     df["Qtd Baixada"]   = pd.to_numeric(df["Qtd Baixada"],   errors="coerce").fillna(0)
     df["Vlr Unit (R$)"] = pd.to_numeric(df["Vlr Unit (R$)"], errors="coerce")
-    # Cabos: compras registram preço por bobina, baixas em metros → unidades incompatíveis.
-    # Preços por metro plausíveis estão abaixo de R$40. Qualquer valor acima é por bobina → None.
-    CABO_CAP = 40.0
-    cabo_mask = df["Item"].str.upper().str.contains("CABO", na=False)
-    df.loc[cabo_mask & (df["Vlr Unit (R$)"] > CABO_CAP), "Vlr Unit (R$)"] = None
-    # Sem preço de referência por metro → mantém como None (exibido em branco no relatório)
     df["Vlr Total (R$)"] = df["Vlr Unit (R$)"] * df["Qtd Baixada"]
     df["kit_num"]       = df["Kit"].apply(parse_kit_num)
     return df
