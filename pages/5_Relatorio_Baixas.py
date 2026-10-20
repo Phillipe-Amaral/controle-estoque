@@ -161,10 +161,12 @@ def carregar_baixas():
 
     df["Qtd Baixada"]   = pd.to_numeric(df["Qtd Baixada"],   errors="coerce").fillna(0)
     df["Vlr Unit (R$)"] = pd.to_numeric(df["Vlr Unit (R$)"], errors="coerce")
-    # Cabos têm preço por bobina em algumas compras → cap de R$60/m para evitar distorção
-    CABO_CAP = 60.0
+    # Cabos: compras registram preço por bobina, baixas em metros → unidades incompatíveis.
+    # Preços por metro plausíveis estão abaixo de R$40. Qualquer valor acima é por bobina → None.
+    CABO_CAP = 40.0
     cabo_mask = df["Item"].str.upper().str.contains("CABO", na=False)
     df.loc[cabo_mask & (df["Vlr Unit (R$)"] > CABO_CAP), "Vlr Unit (R$)"] = None
+    # Sem preço de referência por metro → mantém como None (exibido em branco no relatório)
     df["Vlr Total (R$)"] = df["Vlr Unit (R$)"] * df["Qtd Baixada"]
     df["kit_num"]       = df["Kit"].apply(parse_kit_num)
     return df
