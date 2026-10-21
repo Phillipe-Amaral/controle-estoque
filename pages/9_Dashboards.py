@@ -417,8 +417,10 @@ with tab_re:
     st.markdown("#### Impacto financeiro de RE em 24 meses (Real − Orçado por UF)")
 
     df_imp = df[
+        df["data_inst_re"].notna() &           # apenas escolas com RE instalada
         (df["custo_24m_re_real"] > 0) &
-        (df["custo_24m_re_orc"] > 0)
+        (df["custo_24m_re_orc"] > 0) &
+        (df["custo_24m_re_real"] < 1_000_000)  # sanidade: máx R$1M por escola
     ].copy()
     df_imp["delta"] = df_imp["custo_24m_re_real"] - df_imp["custo_24m_re_orc"]
 
