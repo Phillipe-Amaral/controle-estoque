@@ -88,9 +88,10 @@ def carregar_estoque_ri():
         except: pass
     return result
 
-@st.cache_data(ttl=3600)
 _STATUS_EXCLUIR_RE = {"cancelado", "cancelada", "impedido", "impedida", "suspenso", "suspensa",
                       "em reforma", "reforma", "suspenso/impedido"}
+
+@st.cache_data(ttl=3600)
 
 def carregar_dados_re_supabase():
     """Carrega dados de análise RE do Supabase (financeiro_inep)."""
