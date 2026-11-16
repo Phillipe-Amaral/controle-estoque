@@ -80,11 +80,13 @@ def carregar_baixas():
     r_esc  = fetch_all("escolas", "codigo_inep, kit_real_instalado, fase_instalacao")
 
     df_exec = pd.DataFrame(r_exec)
+    df_exec["codigo_inep"] = df_exec["codigo_inep"].astype(str).str.strip()
     df_ei   = pd.DataFrame(r_ei)
     df_parc = pd.DataFrame(r_parc).rename(columns={"id": "parceiro_id", "nome": "parceiro"})
     df_item = pd.DataFrame(r_item).rename(columns={"id": "item_id", "nome": "item"})
     df_comp = pd.DataFrame(r_comp)
     df_esc  = pd.DataFrame(r_esc)
+    df_esc["codigo_inep"] = df_esc["codigo_inep"].astype(str).str.strip()
 
     # Preço médio ponderado — 3 níveis de fallback:
     # 1. por (parceiro_id, item_id)    → exato por parceiro
