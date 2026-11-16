@@ -352,6 +352,134 @@ with tab_geral:
                 unsafe_allow_html=True,
             )
 
+    # ── Dashboard: Receita × Custo RI por Fase ───────────────────────────────
+    st.markdown("---")
+    st.markdown("#### Receita × Custo — Rede Interna por Fase")
+
+    _FASE_IDX = {f: i for i, f in enumerate(FASE_ORDER)}
+
+    df_rc = (
+        df[(df["rec_serv_ri_real"] > 0) | (df["rec_equip_ri_real"] > 0)]
+        .groupby("fase")
+        .agg(
+            rec_servico    = ("rec_serv_ri_real",  "sum"),
+            rec_mercadoria = ("rec_equip_ri_real", "sum"),
+            custo_servico  = ("custo_serv_ri",     "sum"),
+            custo_mercadoria = ("custo_equip_cmv", "sum"),
+        )
+        .reset_index()
+    )
+    df_rc = (df_rc[df_rc["fase"].isin(FASE_ORDER)]
+             .sort_values("fase", key=lambda s: s.map(_FASE_IDX))
+             .copy())
+    df_rc["fase_label"]       = df_rc["fase"].map(FASE_LABELS)
+    df_rc["margem_servico"]   = df_rc["rec_servico"]    - df_rc["custo_servico"]
+    df_rc["margem_mercadoria"]= df_rc["rec_mercadoria"] - df_rc["custo_mercadoria"]
+
+    rc1, rc2 = st.columns(2)
+
+    with rc1:
+        fig_rc = go.Figure()
+        for nome, col_y, cor in [
+            ("Receita Serviço",     "rec_servico",     TEAL),
+            ("Custo Serviço",       "custo_servico",   ROJO),
+            ("Receita Mercadoria",  "rec_mercadoria",  ACCENT),
+            ("Custo Mercadoria",    "custo_mercadoria", AZUL),
+        ]:
+            vals = df_rc[col_y] / 1e6
+            fig_rc.add_bar(
+                name=nome, x=df_rc["fase_label"], y=vals,
+                marker_color=cor,
+                text=[f"R$ {v:.1f}M" for v in vals],
+                textposition="outside", textfont=dict(size=9),
+            )
+        fig_rc.update_layout(barmode="group")
+        base_layout(fig_rc, "Receita × Custo RI por Fase (R$ milhões)", height=360)
+        fig_rc.update_yaxes(ticksuffix="M", tickprefix="R$ ")
+        st.plotly_chart(fig_rc, use_container_width=True)
+
+    with rc2:
+        fig_mg = go.Figure()
+        for nome, col_y, cor in [
+            ("Margem Serviço",     "margem_servico",    TEAL),
+            ("Margem Mercadoria",  "margem_mercadoria", ACCENT),
+        ]:
+            vals = df_rc[col_y] / 1e6
+            fig_mg.add_bar(
+                name=nome, x=df_rc["fase_label"], y=vals,
+                marker_color=cor,
+                text=[f"R$ {v:.1f}M" for v in vals],
+                textposition="outside", textfont=dict(size=9),
+            )
+        base_layout(fig_mg, "Margem RI por Fase — Serviço e Mercadoria (R$ milhões)", height=360)
+        fig_mg.update_yaxes(ticksuffix="M", tickprefix="R$ ")
+        st.plotly_chart(fig_mg, use_container_width=True)
+
+    # ── Dashboard: Adquirido × Consumido × A instalar ────────────────────────
+    st.markdown("---")
+    st.markdown("#### Equipamentos RI — Adquirido × Consumido × A instalar")
+
+    _est = carregar_estoque_ri()  # {label: valor}
+    # Reverse label→fase
+    _label_to_fase = {v2: k for k, v2 in FASE_TO_LABEL.items()}
+    _adq_fase = {_label_to_fase.get(lbl, lbl): val for lbl, val in _est.items()}
+
+    # Consumido = custo_equip_cmv de escolas com RI instalada
+    _df_inst = df[df["data_inst_ri"].notna() & (df["custo_equip_cmv"] > 0)]
+    _cons_fase = _df_inst.groupby("fase")["custo_equip_cmv"].sum().to_dict()
+
+    fases_eq = [f for f in FASE_ORDER if f in fases_sel]
+    _rows_eq = []
+    for _fase in fases_eq:
+        _adq  = _adq_fase.get(_fase, 0)
+        _cons = _cons_fase.get(_fase, 0)
+        _saldo = max(0.0, _adq - _cons)
+        _rows_eq.append({
+            "fase":     FASE_LABELS.get(_fase, _fase),
+            "adquirido":   _adq,
+            "consumido":   _cons,
+            "saldo":       _saldo,
+        })
+    df_eq = pd.DataFrame(_rows_eq)
+
+    _adq_tot  = df_eq["adquirido"].sum()
+    _cons_tot = df_eq["consumido"].sum()
+    _saldo_tot = df_eq["saldo"].sum()
+    _pct_cons = _cons_tot / _adq_tot * 100 if _adq_tot > 0 else 0
+
+    eq1, eq2, eq3, eq4 = st.columns(4)
+    eq1.metric("Adquirido (recebido)",    brl(_adq_tot,   milhoes=True))
+    eq2.metric("Consumido (instalado)",   brl(_cons_tot,  milhoes=True),
+               delta=f"{_pct_cons:.0f}% do adquirido")
+    eq3.metric("Saldo disponível",        brl(_saldo_tot, milhoes=True),
+               delta=f"{100-_pct_cons:.0f}% do adquirido")
+    eq4.metric("Escolas com RI instalada", f"{int(_df_inst['inep'].nunique()):,}".replace(",", "."))
+
+    fig_eq = go.Figure()
+    fig_eq.add_bar(
+        name="Consumido",
+        x=df_eq["fase"], y=df_eq["consumido"] / 1e6,
+        marker_color=TEAL,
+        text=[f"R$ {v:.1f}M" for v in df_eq["consumido"] / 1e6],
+        textposition="inside", textfont=dict(color="white", size=10),
+    )
+    fig_eq.add_bar(
+        name="Saldo (a instalar)",
+        x=df_eq["fase"], y=df_eq["saldo"] / 1e6,
+        marker_color=ACCENT,
+        text=[f"R$ {v:.1f}M" for v in df_eq["saldo"] / 1e6],
+        textposition="inside", textfont=dict(color=DARK, size=10),
+    )
+    fig_eq.update_layout(barmode="stack")
+    base_layout(fig_eq, "Equipamentos RI — Consumido × Saldo por Fase (R$ milhões)", height=340)
+    fig_eq.update_yaxes(ticksuffix="M", tickprefix="R$ ")
+    fig_eq.add_annotation(
+        text="Consumido = custo CMV de escolas com RI instalada · Saldo = adquirido − consumido",
+        xref="paper", yref="paper", x=1, y=-0.08,
+        showarrow=False, font=dict(size=9, color=SLATE), xanchor="right",
+    )
+    st.plotly_chart(fig_eq, use_container_width=True)
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — REDE EXTERNA
 # ═══════════════════════════════════════════════════════════════════════════════
