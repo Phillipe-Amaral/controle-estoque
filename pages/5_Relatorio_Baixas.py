@@ -87,6 +87,7 @@ def carregar_baixas():
     df_comp = pd.DataFrame(r_comp)
     df_esc  = pd.DataFrame(r_esc)
     df_esc["codigo_inep"] = df_esc["codigo_inep"].astype(str).str.strip()
+    df_esc = df_esc.drop_duplicates(subset=["codigo_inep"], keep="first")
 
     # Preço médio ponderado — 3 níveis de fallback:
     # 1. por (parceiro_id, item_id)    → exato por parceiro
