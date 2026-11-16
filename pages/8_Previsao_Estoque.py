@@ -166,7 +166,9 @@ def calc_previsao(df_circ, df_exec, df_topo, desvio):
         idx = df_exec.set_index('inep')
         for col in ['parceiro','kit_plan','aps_plan','fabricante']:
             if col in idx.columns:
-                a_inst.loc[faltam, col] = a_inst.loc[faltam,'inep'].map(idx[col])
+                mapped = a_inst.loc[faltam, 'inep'].map(idx[col])
+                mapped.index = a_inst.loc[faltam].index
+                a_inst.loc[faltam, col] = mapped
 
     a_inst = a_inst[a_inst['kit_plan'] > 0].dropna(subset=['parceiro'])
     a_inst = a_inst[a_inst['parceiro'].str.strip() != '']
