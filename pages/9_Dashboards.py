@@ -88,8 +88,11 @@ def carregar_estoque_ri():
         except: pass
     return result
 
-_STATUS_EXCLUIR_RE = {"cancelado", "cancelada", "impedido", "impedida", "suspenso", "suspensa",
-                      "em reforma", "reforma", "suspenso/impedido"}
+def _status_re_excluido(s: str) -> bool:
+    """Retorna True para status que indicam escola não será instalada."""
+    s = s.lower().strip()
+    return any(kw in s for kw in ("cancelado", "suspenso", "em reforma", "inviável",
+                                   "inviavel", "reprovado", "impedido", "devolvido"))
 
 @st.cache_data(ttl=3600)
 
@@ -816,7 +819,7 @@ with tab_re:
         with rb1:
             FASE_ORDER_RE = ["4.1", "4.2", "5.0"]
             # Exclui escolas canceladas/impedidas/suspensas/em reforma
-            df_rf_ativo = df_rf[~df_rf["status_re"].isin(_STATUS_EXCLUIR_RE)].copy()
+            df_rf_ativo = df_rf[~df_rf["status_re"].apply(_status_re_excluido)].copy()
 
             df_fase_clf = (
                 df_rf_ativo[df_rf_ativo["classificacao"].isin(["Broker", "Provedor", "Operadora"]) &
