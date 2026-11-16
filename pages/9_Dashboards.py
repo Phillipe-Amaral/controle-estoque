@@ -803,6 +803,75 @@ with tab_re:
             fig_clf.update_yaxes(tickprefix="R$ ")
             st.plotly_chart(fig_clf, use_container_width=True)
 
+        # ── ROW 1b: Mensalidade por Fase × Classificação + Mix por Fase ────────
+        st.markdown("---")
+        rb1, rb2 = st.columns(2)
+
+        with rb1:
+            df_fase_clf = (
+                df_rf[df_rf["classificacao"].isin(["Broker", "Provedor", "Operadora"]) &
+                      df_rf["fase"].notna() & (df_rf["fase"] != "")]
+                .groupby(["fase", "classificacao"])
+                .agg(media=("mensalidade", "mean"), count=("mensalidade", "count"))
+                .reset_index()
+            )
+            FASE_ORDER_RE = ["4.1", "4.2", "5.0"]
+            df_fase_clf = df_fase_clf[df_fase_clf["fase"].isin(FASE_ORDER_RE)]
+            df_fase_clf["fase_label"] = "Fase " + df_fase_clf["fase"]
+
+            fig_fase_clf = go.Figure()
+            for cls, cor in [("Broker", TEAL), ("Provedor", ACCENT), ("Operadora", AZUL)]:
+                sub = df_fase_clf[df_fase_clf["classificacao"] == cls].sort_values("fase")
+                if sub.empty:
+                    continue
+                fig_fase_clf.add_bar(
+                    name=cls,
+                    x=sub["fase_label"],
+                    y=sub["media"],
+                    marker_color=cor,
+                    text=[f"R$ {v:,.0f}".replace(",", ".") for v in sub["media"]],
+                    textposition="outside",
+                    textfont=dict(size=10),
+                )
+            fig_fase_clf.update_layout(barmode="group")
+            base_layout(fig_fase_clf, "Mensalidade Média por Fase × Classificação (R$)", height=380)
+            fig_fase_clf.update_yaxes(tickprefix="R$ ")
+            st.plotly_chart(fig_fase_clf, use_container_width=True)
+
+        with rb2:
+            df_mix_fase = (
+                df_rf[df_rf["classificacao"].isin(["Broker", "Provedor", "Operadora"]) &
+                      df_rf["fase"].notna() & (df_rf["fase"] != "")]
+                .groupby(["fase", "classificacao"])
+                .size()
+                .reset_index(name="qtd")
+            )
+            df_mix_fase = df_mix_fase[df_mix_fase["fase"].isin(FASE_ORDER_RE)]
+            totais_fase = df_mix_fase.groupby("fase")["qtd"].transform("sum")
+            df_mix_fase["pct"] = (df_mix_fase["qtd"] / totais_fase * 100).round(1)
+            df_mix_fase["fase_label"] = "Fase " + df_mix_fase["fase"]
+
+            fig_mix_fase = go.Figure()
+            for cls, cor in [("Broker", TEAL), ("Provedor", ACCENT), ("Operadora", AZUL)]:
+                sub = df_mix_fase[df_mix_fase["classificacao"] == cls].sort_values("fase")
+                if sub.empty:
+                    continue
+                fig_mix_fase.add_bar(
+                    name=cls,
+                    x=sub["fase_label"],
+                    y=sub["pct"],
+                    marker_color=cor,
+                    text=[f"{p:.0f}%<br>({n:,})".replace(",", ".") for p, n in
+                          zip(sub["pct"], sub["qtd"])],
+                    textposition="inside",
+                    textfont=dict(color="white", size=10),
+                )
+            fig_mix_fase.update_layout(barmode="stack")
+            base_layout(fig_mix_fase, "Mix Contratado por Fase: Qtd e % (Broker / Provedor / Operadora)",
+                        height=380)
+            fig_mix_fase.update_yaxes(range=[0, 105], ticksuffix="%", showgrid=True)
+            st.plotly_chart(fig_mix_fase, use_container_width=True)
+
         # ── ROW 2: Média por Velocidade + Média por Localização ───────────────
         r2c1, r2c2 = st.columns(2)
 
