@@ -89,9 +89,12 @@ def carregar_estoque_ri():
     return result
 
 @st.cache_data(ttl=3600)
+_STATUS_EXCLUIR_RE = {"cancelado", "cancelada", "impedido", "impedida", "suspenso", "suspensa",
+                      "em reforma", "reforma", "suspenso/impedido"}
+
 def carregar_dados_re_supabase():
     """Carrega dados de análise RE do Supabase (financeiro_inep)."""
-    cols = "inep,uf,municipio,fase,custo_mensal_re_real,custo_inst_re_real,custo_24m_re_real,classificacao_re,fornecedor_re,velocidade_re,localizacao_re"
+    cols = "inep,uf,municipio,fase,custo_mensal_re_real,custo_inst_re_real,custo_24m_re_real,classificacao_re,fornecedor_re,velocidade_re,localizacao_re,status_contratacao_re"
     rows_all, offset = [], 0
     while True:
         r = sb.table("financeiro_inep").select(cols).range(offset, offset + 999).execute()
@@ -114,6 +117,7 @@ def carregar_dados_re_supabase():
         else:                 vel_faixa = ">500 Mbps"
         clf = str(rec.get("classificacao_re") or "").strip().title() or "Não informado"
         loc = str(rec.get("localizacao_re") or "").strip().upper() or "NÃO INFORMADO"
+        status_re = str(rec.get("status_contratacao_re") or "").strip().lower()
         rows.append({
             "fase":         str(rec.get("fase") or "").strip(),
             "uf":           str(uf).strip(),
@@ -126,6 +130,7 @@ def carregar_dados_re_supabase():
             "instalacao":   float(rec.get("custo_inst_re_real") or 0),
             "custo_24m":    float(rec.get("custo_24m_re_real") or 0),
             "localizacao":  loc,
+            "status_re":    status_re,
         })
     return pd.DataFrame(rows)
 
@@ -808,16 +813,29 @@ with tab_re:
         rb1, rb2 = st.columns(2)
 
         with rb1:
+            FASE_ORDER_RE = ["4.1", "4.2", "5.0"]
+            # Exclui escolas canceladas/impedidas/suspensas/em reforma
+            df_rf_ativo = df_rf[~df_rf["status_re"].isin(_STATUS_EXCLUIR_RE)].copy()
+
             df_fase_clf = (
-                df_rf[df_rf["classificacao"].isin(["Broker", "Provedor", "Operadora"]) &
-                      df_rf["fase"].notna() & (df_rf["fase"] != "")]
+                df_rf_ativo[df_rf_ativo["classificacao"].isin(["Broker", "Provedor", "Operadora"]) &
+                            df_rf_ativo["fase"].notna() & (df_rf_ativo["fase"] != "")]
                 .groupby(["fase", "classificacao"])
                 .agg(media=("mensalidade", "mean"), count=("mensalidade", "count"))
                 .reset_index()
             )
-            FASE_ORDER_RE = ["4.1", "4.2", "5.0"]
             df_fase_clf = df_fase_clf[df_fase_clf["fase"].isin(FASE_ORDER_RE)]
             df_fase_clf["fase_label"] = "Fase " + df_fase_clf["fase"]
+
+            # Média geral por fase (todas as classificações, escolas ativas)
+            df_media_fase = (
+                df_rf_ativo[df_rf_ativo["fase"].isin(FASE_ORDER_RE) &
+                            df_rf_ativo["fase"].notna() & (df_rf_ativo["fase"] != "")]
+                .groupby("fase")["mensalidade"].mean()
+                .reset_index()
+                .rename(columns={"mensalidade": "media_geral"})
+            )
+            df_media_fase["fase_label"] = "Fase " + df_media_fase["fase"]
 
             fig_fase_clf = go.Figure()
             for cls, cor in [("Broker", TEAL), ("Provedor", ACCENT), ("Operadora", AZUL)]:
@@ -833,15 +851,29 @@ with tab_re:
                     textposition="outside",
                     textfont=dict(size=10),
                 )
+            # Linha de média geral por fase
+            if not df_media_fase.empty:
+                fig_fase_clf.add_scatter(
+                    name="Média geral",
+                    x=df_media_fase["fase_label"],
+                    y=df_media_fase["media_geral"],
+                    mode="lines+markers+text",
+                    line=dict(color=SLATE, width=2.5, dash="dot"),
+                    marker=dict(size=10, color=SLATE, symbol="diamond",
+                                line=dict(width=2, color="white")),
+                    text=[f"R$ {v:,.0f}".replace(",", ".") for v in df_media_fase["media_geral"]],
+                    textposition="top center",
+                    textfont=dict(size=10, color=SLATE),
+                )
             fig_fase_clf.update_layout(barmode="group")
-            base_layout(fig_fase_clf, "Mensalidade Média por Fase × Classificação (R$)", height=380)
+            base_layout(fig_fase_clf, "Mensalidade Média por Fase × Classificação (R$)", height=400)
             fig_fase_clf.update_yaxes(tickprefix="R$ ")
             st.plotly_chart(fig_fase_clf, use_container_width=True)
 
         with rb2:
             df_mix_fase = (
-                df_rf[df_rf["classificacao"].isin(["Broker", "Provedor", "Operadora"]) &
-                      df_rf["fase"].notna() & (df_rf["fase"] != "")]
+                df_rf_ativo[df_rf_ativo["classificacao"].isin(["Broker", "Provedor", "Operadora"]) &
+                            df_rf_ativo["fase"].notna() & (df_rf_ativo["fase"] != "")]
                 .groupby(["fase", "classificacao"])
                 .size()
                 .reset_index(name="qtd")
