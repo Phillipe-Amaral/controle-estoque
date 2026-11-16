@@ -72,17 +72,19 @@ def fetch_all(table, cols):
 @st.cache_data(ttl=60)
 def carregar_baixas():
     r_exec = fetch_all("execucoes",
-                       "id, parceiro_id, nome_escola, codigo_inep, municipio, uf, kit, fase, data_implantacao")
+                       "id, parceiro_id, nome_escola, codigo_inep, municipio, uf, kit, fase, fabricante, data_implantacao")
     r_ei   = fetch_all("execucao_itens", "execucao_id, item_id, qtd")
     r_parc = sb.table("parceiros").select("id, nome").execute().data
     r_item = sb.table("itens").select("id, nome").execute().data
     r_comp = fetch_all("compras", "parceiro_id, item_id, qtd_recebida, valor_unitario, fase, uf")
+    r_esc  = fetch_all("escolas", "codigo_inep, kit_real_instalado, fase_instalacao")
 
     df_exec = pd.DataFrame(r_exec)
     df_ei   = pd.DataFrame(r_ei)
     df_parc = pd.DataFrame(r_parc).rename(columns={"id": "parceiro_id", "nome": "parceiro"})
     df_item = pd.DataFrame(r_item).rename(columns={"id": "item_id", "nome": "item"})
     df_comp = pd.DataFrame(r_comp)
+    df_esc  = pd.DataFrame(r_esc)
 
     # Preço médio ponderado — 3 níveis de fallback:
     # 1. por (parceiro_id, item_id)    → exato por parceiro
@@ -132,7 +134,8 @@ def carregar_baixas():
           .merge(df_item, on="item_id")
           .merge(df_preco_parc, on=["parceiro_id", "item_id"], how="left")
           .merge(df_preco_fase_uf, on=["item_id", "fase", "uf"], how="left")
-          .merge(df_preco_item, on="item_id", how="left"))
+          .merge(df_preco_item, on="item_id", how="left")
+          .merge(df_esc, left_on="codigo_inep", right_on="codigo_inep", how="left"))
 
     # Aplica fallback em cascata
     df["valor_unitario"] = (df["valor_unitario"]
@@ -142,9 +145,22 @@ def carregar_baixas():
 
     df["Função"] = df["item"].apply(get_funcao)
 
+    # Monta coluna Topologia Usada a partir de escolas
+    def _topo(row):
+        fab  = row.get("fabricante", "")
+        kit  = row.get("kit_real_instalado", "")
+        fase = row.get("fase_instalacao", "")
+        if pd.isna(fab) or fab == "": fab = ""
+        if pd.isna(kit): kit = ""
+        if pd.isna(fase) or fase == "": fase = ""
+        if fab and kit != "":
+            return f"{fab} KIT {int(kit) if str(kit).isdigit() else kit} - Fase {fase}"
+        return ""
+    df["topologia_usada"] = df.apply(_topo, axis=1)
+
     df = df[[
         "parceiro", "fase", "uf", "municipio",
-        "nome_escola", "codigo_inep", "kit", "Função", "item", "qtd",
+        "nome_escola", "codigo_inep", "kit", "topologia_usada", "Função", "item", "qtd",
         "valor_unitario", "data_implantacao"
     ]].rename(columns={
         "parceiro":        "Parceiro",
@@ -154,16 +170,17 @@ def carregar_baixas():
         "nome_escola":     "Escola",
         "codigo_inep":     "INEP",
         "kit":             "Kit",
+        "topologia_usada": "Topologia Usada",
         "item":            "Item",
         "qtd":             "Qtd Baixada",
         "valor_unitario":  "Vlr Unit (R$)",
         "data_implantacao":"Data",
     })
 
-    df["Qtd Baixada"]   = pd.to_numeric(df["Qtd Baixada"],   errors="coerce").fillna(0)
-    df["Vlr Unit (R$)"] = pd.to_numeric(df["Vlr Unit (R$)"], errors="coerce")
+    df["Qtd Baixada"]    = pd.to_numeric(df["Qtd Baixada"],    errors="coerce").fillna(0)
+    df["Vlr Unit (R$)"]  = pd.to_numeric(df["Vlr Unit (R$)"],  errors="coerce")
     df["Vlr Total (R$)"] = df["Vlr Unit (R$)"] * df["Qtd Baixada"]
-    df["kit_num"]       = df["Kit"].apply(parse_kit_num)
+    df["kit_num"]        = df["Kit"].apply(parse_kit_num)
     return df
 
 page_header("📋 Relatório de Baixas por Escola",
@@ -219,7 +236,7 @@ tab1, tab2, tab3 = st.tabs([
 # ══════════════════════════════════════════════════════════════════════════════
 with tab1:
     cols_display = [
-        "Parceiro","Fase","UF","Município","Escola","INEP","Kit","Função","Item",
+        "Parceiro","Fase","UF","Município","Escola","INEP","Kit","Topologia Usada","Função","Item",
         "Qtd Baixada","Vlr Unit (R$)","Vlr Total (R$)","Data"
     ]
     st.dataframe(
